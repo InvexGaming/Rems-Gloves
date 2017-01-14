@@ -1,0 +1,20 @@
+﻿"Phrases"
+{
+  "Menu title"
+  {
+    "en"		"Gloves:"
+  }
+  "Must Be Alive"
+  {
+    "en"		"You must be alive to choose {green}gloves{default}."
+  }
+  "Must be VIP"
+  {
+    "en"			"You must be a VIP user to use this command. Type {green}!vip{default} to learn more."
+  }
+  "Equipped Glove"
+  {
+    "#format"	"{1:s}"
+    "en"			"You have equipped the {green}{1}{default} gloves."
+  }
+}
