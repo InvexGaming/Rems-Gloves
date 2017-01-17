@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton  
-#define VERSION "1.00"
+#define VERSION "1.01"
 #define SERVER_LOCK_IP "45.121.211.57"
 
 public Plugin myinfo =
@@ -24,10 +24,12 @@ public Plugin myinfo =
 //Definitions
 #define CHAT_TAG_PREFIX "[{green}RG{default}] "
 #define MAX_GLOVES 50
+#define ANTI_FLOOD_TIME 3.0
 
 enum Listing
 {
   String:listName[64],
+  String:category[64],
   ItemDefinitionIndex,
   FallbackPaintKit,
   String:model[PLATFORM_MAX_PATH],
@@ -37,12 +39,17 @@ enum Listing
 int g_gloves[MAX_GLOVES][Listing];
 int g_gloveCount = 1; //starts from 1, not 0
 int g_ClientGlove[MAXPLAYERS+1] = {0, ...};
+bool g_canUse[MAXPLAYERS+1] = {true, ...}; //for anti-flood
 
 //Flags
 AdminFlag rgFlag = Admin_Custom3;
 
-//Handles
+//Menu
 Menu glovesMenu = null;
+ArrayList categories;
+Menu subMenus[MAX_GLOVES];
+
+//Cookies
 Handle c_GloveIndex = null;
 
 public void OnPluginStart()
@@ -63,10 +70,26 @@ public void OnPluginStart()
   //Translations
   LoadTranslations("rg.phrases");
   
+  //Init array list
+  categories = CreateArray(MAX_GLOVES);
+  
   //Read gloves config file
   ReadGloveConfigFile();
   
+  //Process players and set them up
+  for (int client = 1; client <= MaxClients; ++client) {
+    if (!IsClientInGame(client))
+      continue;
+    
+    OnClientPutInServer(client);
+  }
+  
   HookEvent("player_spawn", Event_PlayerSpawn);
+}
+
+public void OnClientPutInServer(int client)
+{
+  g_canUse[client] = true;
 }
 
 public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
@@ -88,7 +111,8 @@ public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadca
 
 void DelayedSpawnGiveGloves(int client)
 {
-  GiveClientGloves(client, g_ClientGlove[client]);
+  if (g_ClientGlove[client] != 0)
+    GiveClientGloves(client, g_ClientGlove[client]);
 }
 
 //Monitor chat to capture commands
@@ -103,8 +127,10 @@ public Action OnClientSayCommand(int client, const char[] command_t, const char[
   
   //Check if command starts with following strings
   if( StrEqual(command, "!gloves", false) ||
+      StrEqual(command, "!glove", false) ||
       StrEqual(command, "!rg", false) ||
       StrEqual(command, "/gloves", false) ||
+      StrEqual(command, "/glove", false) ||
       StrEqual(command, "/rg", false)
     )
   {
@@ -146,18 +172,156 @@ public void ShowGlovesMenu(int client)
 public int glovesMenuHandler(Menu menu, MenuAction action, int client, int itemNum)
 {
   if (action == MenuAction_Select) {
-    //Itemnum starts at 0 so we have to subtract 1 so it matches the menu options
-    GiveClientGloves(client, itemNum - 1);
+    char categoryName[64];
+    GetMenuItem(menu, itemNum, categoryName, sizeof(categoryName));
     
-    //Print Chat Option
-    CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", g_gloves[itemNum - 1][listName]);
+    //Show menu based on category
+    int index = categories.FindString(categoryName);
+    if (index != -1) {
+      DisplayMenu(subMenus[index], client, MENU_TIME_FOREVER);
+    }
+    else if (itemNum == 0 || itemNum == 1) {
+      if (!g_canUse[client]) {
+        CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Anti Flood Message");
+        DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+        return 0;
+      }
+    
+      //Subtract 1 as 0 is default and -1 is random
+      int item = GiveClientGloves(client, itemNum - 1);
+      
+      //Print Chat Option
+      char fullGloveName[64];
+      Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_gloves[item][category], g_gloves[item][listName]);
+      CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
+      
+      //Set anti flood timer
+      g_canUse[client] = false;
+      CreateTimer(ANTI_FLOOD_TIME, Timer_ReEnableUsage, client);
+      
+      DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+    }
+    else {
+      DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+    }
   }
   
   return 0;
 }
 
-void GiveClientGloves(int client, int i)
+public int glovesSubMenuHandler(Menu menu, MenuAction action, int client, int itemNum)
 {
+  if (action == MenuAction_Select) {
+    if (!g_canUse[client]) {
+      CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Anti Flood Message");
+      DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+      return 0;
+    }
+    
+    char itemStr[64];
+    GetMenuItem(menu, itemNum, itemStr, sizeof(itemStr));
+    int item = StringToInt(itemStr);
+  
+    GiveClientGloves(client, item);
+    
+    //Print Chat Option
+    char fullGloveName[64];
+    Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_gloves[item][category], g_gloves[item][listName]);
+    CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
+    
+    //Set anti flood timer
+    g_canUse[client] = false;
+    CreateTimer(ANTI_FLOOD_TIME, Timer_ReEnableUsage, client);
+    
+    DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+  }
+  else if (action == MenuAction_Cancel)
+  {
+    if (itemNum == MenuCancel_ExitBack) {
+      //Goto main menu
+      DisplayMenuAtItem(glovesMenu, client, 0, 0);
+    }
+  }
+  
+  return 0;
+}
+
+//Re-enable ws for particular client
+public Action Timer_ReEnableUsage(Handle timer, int client)
+{
+  g_canUse[client] = true;
+}
+
+//Restore ammo of weapons after equiping gloves
+void RestoreAmmo(int client) {
+  if (IsClientInGame(client) && IsPlayerAlive(client)) {
+    //Only process primary and secondary weapons
+    RestoreAmmoBySlot(client, CS_SLOT_PRIMARY);
+    RestoreAmmoBySlot(client, CS_SLOT_SECONDARY);
+  }
+}
+
+void RestoreAmmoBySlot(int client, int slot)
+{
+  if (GetPlayerWeaponSlot(client, slot) != -1) {
+    int weaponEntity = GetPlayerWeaponSlot(client, slot);
+    if (weaponEntity != -1) {
+      //Get ammo
+      int clip1 = GetEntProp(weaponEntity, Prop_Send, "m_iClip1");
+      int reserve = GetEntProp(weaponEntity, Prop_Send, "m_iPrimaryReserveAmmoCount");
+      
+      //Create timer to restore ammo
+      Handle pack;
+      CreateDataTimer(0.0, SetAmmo, pack);
+      WritePackCell(pack, EntIndexToEntRef(client));
+      WritePackCell(pack, EntIndexToEntRef(weaponEntity));
+      WritePackCell(pack, clip1);
+      WritePackCell(pack, reserve);
+    }
+  }
+}
+
+public Action SetAmmo(Handle timer, Handle pack)
+{
+  int client; 
+  int weapon;
+  int clip1;
+  int reserve;
+  
+  ResetPack(pack);
+  
+  client = EntRefToEntIndex(ReadPackCell(pack)); 
+  weapon = EntRefToEntIndex(ReadPackCell(pack)); 
+  clip1 = ReadPackCell(pack); 
+  reserve = ReadPackCell(pack); 
+  
+  if (IsClientInGame(client) && IsPlayerAlive(client)) {
+    
+    SetEntProp(weapon, Prop_Send, "m_iClip1", clip1);
+    SetEntProp(weapon, Prop_Send, "m_iPrimaryReserveAmmoCount", reserve);
+
+    int offset_ammo = FindDataMapInfo(client, "m_iAmmo");
+    int primaryAmmo = 0;
+    int secondaryAmmo = 0;
+    
+    int offset1 = offset_ammo + (GetEntProp(weapon, Prop_Data, "m_iPrimaryAmmoType") * 4);
+    SetEntData(client, offset1, primaryAmmo, 4, true);
+
+    int offset2 = offset_ammo + (GetEntProp(weapon, Prop_Data, "m_iSecondaryAmmoType") * 4);
+    SetEntData(client, offset2, secondaryAmmo, 4, true);
+  }
+  
+  return Plugin_Handled;
+}
+
+//Returns index i (converting randomised indexes first)
+int GiveClientGloves(int client, int i)
+{
+  //We need to set the ammo of primary/secondaries to the correct amount
+  //This is because giving a player a "wearable_item" gives them full ammo
+  //On all of their guns
+  RestoreAmmo(client);
+
   int item = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon"); 
   SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", -1); 
   
@@ -165,11 +329,13 @@ void GiveClientGloves(int client, int i)
   
   //Restore default
   if (i == 0) {
+    g_ClientGlove[client] = i;
+    
     Handle pack2;
     CreateDataTimer(0.0, RestoreActiveWeapon, pack2, TIMER_FLAG_NO_MAPCHANGE);
     WritePackCell(pack2, EntIndexToEntRef(client));
     WritePackCell(pack2, EntIndexToEntRef(item));
-    return;
+    return i;
   }
   
   //For randomised index
@@ -185,8 +351,7 @@ void GiveClientGloves(int client, int i)
     int m_iItemIDHigh = GetEntProp(ent, Prop_Send, "m_iItemIDHigh"); 
     int m_iItemIDLow = GetEntProp(ent, Prop_Send, "m_iItemIDLow"); 
     
-    SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", g_gloves[i][ItemDefinitionIndex]); 
-    SetEntProp(ent, Prop_Send, "m_iItemIDLow", 8192); 
+    SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", g_gloves[i][ItemDefinitionIndex]);
     SetEntProp(ent, Prop_Send, "m_iItemIDHigh", -1);
     SetEntProp(ent, Prop_Send, "m_iEntityQuality", 4);
     
@@ -194,14 +359,14 @@ void GiveClientGloves(int client, int i)
     SetEntProp(ent, Prop_Send,  "m_iAccountID", GetSteamAccountID(client)); 
     SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", g_gloves[i][wear]); 
     SetEntProp(ent, Prop_Send,  "m_nFallbackSeed", 0); 
-    SetEntProp(ent, Prop_Send,  "m_nFallbackStatTrak", -1); 
+    SetEntProp(ent, Prop_Send,  "m_nFallbackStatTrak", -1);
 
     int modelEntity = 0;
-    if (!IsModelPrecached(g_gloves[i][model]))
-      modelEntity = PrecacheModel(g_gloves[i][model]);
+    //if (!IsModelPrecached(g_gloves[i][model]))
+    modelEntity = PrecacheModel(g_gloves[i][model]);
     SetEntProp(ent, Prop_Send, "m_nModelIndex", modelEntity);
     SetEntityModel(ent, g_gloves[i][model]);
-     
+    
     SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent); 
     
     //Restore the previous itemID
@@ -220,7 +385,7 @@ void GiveClientGloves(int client, int i)
     g_ClientGlove[client] = i;
   }
   
-  return; 
+  return i; 
 }
 
 public void OnClientCookiesCached(int client)
@@ -273,6 +438,7 @@ void ReadGloveConfigFile()
     {
       //Store values
       kv.GetSectionName(g_gloves[g_gloveCount][listName], 64);
+      kv.GetString("category", g_gloves[g_gloveCount][category], 64);
       g_gloves[g_gloveCount][ItemDefinitionIndex] = kv.GetNum("ItemDefinitionIndex");
       g_gloves[g_gloveCount][FallbackPaintKit] = kv.GetNum("FallbackPaintKit");
       kv.GetString("model", g_gloves[g_gloveCount][model], PLATFORM_MAX_PATH);
@@ -300,11 +466,33 @@ void ReadGloveConfigFile()
    
   AddMenuItem(glovesMenu, "-1", "Random Gloves");
   AddMenuItem(glovesMenu, "0", "Default Gloves");
+  Format(g_gloves[0][listName], 64, "Default");
+  Format(g_gloves[0][category], 64, "CSGO");
   
+  //Create submenus
+  ClearArray(categories);
+ 
   char item[4];
+  char categoryName[64];
   for (int i = 1; i < g_gloveCount; ++i) {
-    Format(item, sizeof(item), "%i", i);
-    AddMenuItem(glovesMenu, item, g_gloves[i][listName]);
+    int index = categories.FindString(g_gloves[i][category]);
+    if (index == -1) {
+      //Push
+      int newIndex = categories.PushString(g_gloves[i][category]);
+      
+      //Add menu option
+      Format(categoryName, sizeof(categoryName), "%s", g_gloves[i][category]);
+      AddMenuItem(glovesMenu, categoryName, g_gloves[i][category]);
+      
+      //Create Menu
+      subMenus[newIndex] = CreateMenu(glovesSubMenuHandler);
+      SetMenuExitBackButton(subMenus[newIndex], true);
+      SetMenuTitle(subMenus[newIndex], "%s Gloves:", g_gloves[i][category]);
+    } else {
+      //Add item to submenu
+      Format(item, sizeof(item), "%i", i);
+      AddMenuItem(subMenus[index], item, g_gloves[i][listName]);
+    }
   }
   
   SetMenuExitButton(glovesMenu, true);
@@ -344,7 +532,7 @@ public Action RestoreActiveWeapon(Handle timer, Handle pack)
   item = EntRefToEntIndex(ReadPackCell(pack)); 
    
   if (client != INVALID_ENT_REFERENCE && item != INVALID_ENT_REFERENCE) 
-    SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", item); 
+    SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", item);
   
   return Plugin_Stop;
 }

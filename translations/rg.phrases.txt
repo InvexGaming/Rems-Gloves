@@ -17,4 +17,8 @@
     "#format"	"{1:s}"
     "en"			"You have equipped the {green}{1}{default} gloves."
   }
+  "Anti Flood Message"
+  {
+    "en" "You are using this plugin too quickly, please wait a little then try again."
+  }
 }
