@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton  
-#define VERSION "1.01"
+#define VERSION "1.02"
 #define SERVER_LOCK_IP "45.121.211.57"
 
 public Plugin myinfo =
@@ -32,13 +32,13 @@ enum Listing
   String:category[64],
   ItemDefinitionIndex,
   FallbackPaintKit,
-  String:model[PLATFORM_MAX_PATH],
   Float:wear
 }
 
 int g_gloves[MAX_GLOVES][Listing];
 int g_gloveCount = 1; //starts from 1, not 0
 int g_ClientGlove[MAXPLAYERS+1] = {0, ...};
+int g_ClientGloveEntities[MAXPLAYERS+1] = {-1, ...};
 bool g_canUse[MAXPLAYERS+1] = {true, ...}; //for anti-flood
 
 //Flags
@@ -85,6 +85,20 @@ public void OnPluginStart()
   }
   
   HookEvent("player_spawn", Event_PlayerSpawn);
+}
+
+public void OnPluginEnd()
+{
+  for(int i = 1; i <= MaxClients; ++i) {
+    if (IsClientConnected(i) && IsClientInGame(i)) {
+      //Cookie saving
+      OnClientDisconnect(i);
+      
+      //Removing gloves
+      if (IsPlayerAlive(i))
+        RemoveClientGloves(i);
+    }
+  }
 }
 
 public void OnClientPutInServer(int client)
@@ -190,10 +204,12 @@ public int glovesMenuHandler(Menu menu, MenuAction action, int client, int itemN
       //Subtract 1 as 0 is default and -1 is random
       int item = GiveClientGloves(client, itemNum - 1);
       
-      //Print Chat Option
-      char fullGloveName[64];
-      Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_gloves[item][category], g_gloves[item][listName]);
-      CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
+      if (item != -1) {
+        //Print Chat Option
+        char fullGloveName[64];
+        Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_gloves[item][category], g_gloves[item][listName]);
+        CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
+      }
       
       //Set anti flood timer
       g_canUse[client] = false;
@@ -314,78 +330,85 @@ public Action SetAmmo(Handle timer, Handle pack)
   return Plugin_Handled;
 }
 
+void RemoveClientGloves(int client)
+{
+  if (IsClientConnected(client) && IsClientInGame(client) && IsPlayerAlive(client)) {
+    if (g_ClientGloveEntities[client] != -1 && IsWearable(g_ClientGloveEntities[client])) {
+      AcceptEntityInput(g_ClientGloveEntities[client], "Kill");
+      g_ClientGloveEntities[client] = -1;
+    }
+  }
+}
+
 //Returns index i (converting randomised indexes first)
 int GiveClientGloves(int client, int i)
 {
+  if(!IsClientConnected(client) || !IsClientInGame(client) || !IsPlayerAlive(client) || IsFakeClient(client))
+    return -1;
+    
+  //Invalid index
+  if (i < -1 || i > g_gloveCount - 1)
+    return -1;
+    
   //We need to set the ammo of primary/secondaries to the correct amount
   //This is because giving a player a "wearable_item" gives them full ammo
   //On all of their guns
   RestoreAmmo(client);
-
-  int item = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon"); 
-  SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", -1); 
-  
-  int ent = GivePlayerItem(client, "wearable_item");
-  
-  //Restore default
-  if (i == 0) {
-    g_ClientGlove[client] = i;
-    
-    Handle pack2;
-    CreateDataTimer(0.0, RestoreActiveWeapon, pack2, TIMER_FLAG_NO_MAPCHANGE);
-    WritePackCell(pack2, EntIndexToEntRef(client));
-    WritePackCell(pack2, EntIndexToEntRef(item));
-    return i;
-  }
   
   //For randomised index
-  if(i == -1)
-    i = GetRandomInt(1, g_gloveCount - 1);
-  
-  //Set render mode none so we don't see 'floating arms'
-  //These floating arms will be killed later on
-  SetEntityRenderMode(ent, RENDER_NONE);
-  
-  if (ent != -1) 
-  {
-    int m_iItemIDHigh = GetEntProp(ent, Prop_Send, "m_iItemIDHigh"); 
-    int m_iItemIDLow = GetEntProp(ent, Prop_Send, "m_iItemIDLow"); 
-    
-    SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", g_gloves[i][ItemDefinitionIndex]);
-    SetEntProp(ent, Prop_Send, "m_iItemIDHigh", -1);
-    SetEntProp(ent, Prop_Send, "m_iEntityQuality", 4);
-    
-    SetEntProp(ent, Prop_Send,  "m_nFallbackPaintKit", g_gloves[i][FallbackPaintKit]);
-    SetEntProp(ent, Prop_Send,  "m_iAccountID", GetSteamAccountID(client)); 
-    SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", g_gloves[i][wear]); 
-    SetEntProp(ent, Prop_Send,  "m_nFallbackSeed", 0); 
-    SetEntProp(ent, Prop_Send,  "m_nFallbackStatTrak", -1);
-
-    int modelEntity = 0;
-    //if (!IsModelPrecached(g_gloves[i][model]))
-    modelEntity = PrecacheModel(g_gloves[i][model]);
-    SetEntProp(ent, Prop_Send, "m_nModelIndex", modelEntity);
-    SetEntityModel(ent, g_gloves[i][model]);
-    
-    SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent); 
-    
-    //Restore the previous itemID
-    Handle pack;
-    CreateDataTimer(0.2, RestoreItemID, pack, TIMER_FLAG_NO_MAPCHANGE);
-    WritePackCell(pack, EntIndexToEntRef(ent));
-    WritePackCell(pack, m_iItemIDHigh);
-    WritePackCell(pack, m_iItemIDLow);
-     
-    Handle pack2;
-    CreateDataTimer(0.0, RestoreActiveWeapon, pack2, TIMER_FLAG_NO_MAPCHANGE);
-    WritePackCell(pack2, EntIndexToEntRef(client));
-    WritePackCell(pack2, EntIndexToEntRef(item));
-    
-    //Set local variable
-    g_ClientGlove[client] = i;
+  //Keep picking random number until a different one is found
+  if(i == -1) {
+    while (i == g_ClientGlove[client] || i == -1)
+      i = GetRandomInt(1, g_gloveCount - 1);
   }
   
-  return i; 
+  g_ClientGlove[client] = i;
+  
+  int item = GetEntPropEnt(client, Prop_Send, "m_hActiveWeapon"); 
+  SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", -1);
+  
+  //Remove current gloves
+  RemoveClientGloves(client);
+  
+  int ent = GivePlayerItem(client, "wearable_item");
+  g_ClientGloveEntities[client] = ent;
+  
+  //Process non-default gloves
+  if (ent != -1 && IsWearable(ent) && (i != 0)) {
+    SetEntPropEnt(client, Prop_Send, "m_hMyWearables", ent);
+    
+    SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", g_gloves[i][ItemDefinitionIndex]);
+    SetEntProp(ent, Prop_Send,  "m_nFallbackPaintKit", g_gloves[i][FallbackPaintKit]);
+    SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", g_gloves[i][wear]);
+    SetEntProp(ent, Prop_Send, "m_iItemIDLow", 2048);
+    SetEntProp(ent, Prop_Send, "m_iEntityQuality", 4);
+    SetEntProp(ent, Prop_Send,  "m_nFallbackSeed", 0);
+    SetEntProp(ent, Prop_Send,  "m_nFallbackStatTrak", -1);
+    SetEntProp(ent, Prop_Send, "m_bInitialized", 1); //removed wearable error message
+
+    SetEntPropEnt(ent, Prop_Data, "m_hParent", client);
+    SetEntPropEnt(ent, Prop_Data, "m_hOwnerEntity", client);
+    SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", client); //for thirdperson view
+    SetEntProp(client, Prop_Send, "m_nBody", 1); //for thirdperson view
+    
+    DispatchSpawn(ent);
+  }
+  
+  //If default skin, reset these
+  if (i == 0) {
+    SetEntPropEnt(client, Prop_Send, "m_hMyWearables", -1);
+    SetEntProp(client, Prop_Send, "m_nBody", 0);
+  }
+  
+  Handle pack;
+  CreateDataTimer(0.15, RestoreActiveWeapon, pack, TIMER_FLAG_NO_MAPCHANGE);
+  WritePackCell(pack, EntIndexToEntRef(client));
+  if (IsValidEntity(item))
+    WritePackCell(pack, EntIndexToEntRef(item));
+  else
+    WritePackCell(pack, -1);
+  
+  return i;
 }
 
 public void OnClientCookiesCached(int client)
@@ -403,17 +426,15 @@ public void OnClientDisconnect(int client)
     IntToString(g_ClientGlove[client], index, sizeof(index));
     SetClientCookie(client, c_GloveIndex, index);
   }
-
+  
   g_ClientGlove[client] = 0;
-}
-
-//Process clients when plugin ends (call cleanup for each client)
-public void OnPluginEnd()
-{
-  for (int client = 1; client <= MaxClients; ++client) {
-    if (IsClientInGame(client)) {
-      OnClientDisconnect(client);
-    }
+  g_ClientGloveEntities[client] = -1;
+  
+  //Reset gloves
+  if (IsClientConnected(client) && IsClientInGame(client) && !IsFakeClient(client)) {
+    int wearables = GetEntPropEnt(client, Prop_Send, "m_hMyWearables");
+    if (wearables != -1 && IsWearable(wearables))
+      AcceptEntityInput(wearables, "Kill");
   }
 }
 
@@ -425,7 +446,7 @@ void ReadGloveConfigFile()
   
   if (!FileExists(sPath))
     return;
-    
+  
   KeyValues kv = CreateKeyValues("Gloves");
   g_gloveCount = 1;
   
@@ -441,7 +462,6 @@ void ReadGloveConfigFile()
       kv.GetString("category", g_gloves[g_gloveCount][category], 64);
       g_gloves[g_gloveCount][ItemDefinitionIndex] = kv.GetNum("ItemDefinitionIndex");
       g_gloves[g_gloveCount][FallbackPaintKit] = kv.GetNum("FallbackPaintKit");
-      kv.GetString("model", g_gloves[g_gloveCount][model], PLATFORM_MAX_PATH);
       g_gloves[g_gloveCount][wear] = kv.GetFloat("wear", 0.0001);
       
       ++g_gloveCount;
@@ -498,43 +518,37 @@ void ReadGloveConfigFile()
   SetMenuExitButton(glovesMenu, true);
 }
 
-
-//Restore itemIDs and kill floating arms
-public Action RestoreItemID(Handle timer, Handle pack)
-{
-  int entity;
-  int m_iItemIDHigh;
-  int m_iItemIDLow;
-  
-  ResetPack(pack);
-  entity = EntRefToEntIndex(ReadPackCell(pack));
-  m_iItemIDHigh = ReadPackCell(pack);
-  m_iItemIDLow = ReadPackCell(pack);
-  
-  if (entity != INVALID_ENT_REFERENCE) {
-    SetEntProp(entity, Prop_Send, "m_iItemIDHigh", m_iItemIDHigh);
-    SetEntProp(entity, Prop_Send, "m_iItemIDLow", m_iItemIDLow);
-    AcceptEntityInput(entity, "Kill");
-  }
-  
-  return Plugin_Handled;
-}
-
 //Restore the active weapon
 public Action RestoreActiveWeapon(Handle timer, Handle pack)
 { 
-  int client; 
-  int item; 
+  int client, item; 
 
   ResetPack(pack); 
 
   client = EntRefToEntIndex(ReadPackCell(pack)); 
   item = EntRefToEntIndex(ReadPackCell(pack)); 
    
-  if (client != INVALID_ENT_REFERENCE && item != INVALID_ENT_REFERENCE) 
+  if (client != INVALID_ENT_REFERENCE && item != INVALID_ENT_REFERENCE) {
     SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", item);
+  }
   
   return Plugin_Stop;
+}
+
+//Check if IsWearable
+stock bool IsWearable(int entity) {
+	static char weaponclass[32];
+  
+	if(!IsValidEdict(entity))
+    return false;
+  
+	if (!GetEdictClassname(entity, weaponclass, sizeof(weaponclass)))
+    return false;
+    
+	if(StrContains(weaponclass, "wearable", false) == -1)
+    return false;
+  
+	return true;
 }
 
 //Credits: KissLick (https://forums.alliedmods.net/member.php?u=210752)
