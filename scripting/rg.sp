@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton  
-#define VERSION "1.02"
+#define VERSION "1.03"
 #define SERVER_LOCK_IP "45.121.211.57"
 
 public Plugin myinfo =
@@ -21,10 +21,14 @@ public Plugin myinfo =
   url = "http://www.invexgaming.com.au"
 };
 
+//Convars
+ConVar cvar_show_specmode = null;
+ConVar cvar_hide_thirdperson = null;
+ConVar cvar_antifloodtime = null;
+
 //Definitions
 #define CHAT_TAG_PREFIX "[{green}RG{default}] "
 #define MAX_GLOVES 50
-#define ANTI_FLOOD_TIME 3.0
 
 enum Listing
 {
@@ -65,10 +69,15 @@ public void OnPluginStart()
   }
   
   //Store preferences in clienprefs
-  c_GloveIndex = RegClientCookie("invex_rg", "", CookieAccess_Private);
+  c_GloveIndex = RegClientCookie("rg_gloves_preference", "", CookieAccess_Private);
   
   //Translations
   LoadTranslations("rg.phrases");
+  
+  //Convars
+  cvar_show_specmode = CreateConVar("sm_rg_specmode", "1", "Allow gloves to show when spectating other players (def. 1)");
+  cvar_hide_thirdperson = CreateConVar("sm_rg_hidethirdperson", "1", "Hide gloves in third person view mode, fixed some old custom skin bugs (def. 1)");
+  cvar_antifloodtime = CreateConVar("sm_rg_antifloodtime", "2.0", "Speed at which clients can use the plugin (def. 2.0)");
   
   //Init array list
   categories = CreateArray(MAX_GLOVES);
@@ -85,6 +94,9 @@ public void OnPluginStart()
   }
   
   HookEvent("player_spawn", Event_PlayerSpawn);
+  
+  //Create config file
+  AutoExecConfig(true, "rg");
 }
 
 public void OnPluginEnd()
@@ -213,7 +225,7 @@ public int glovesMenuHandler(Menu menu, MenuAction action, int client, int itemN
       
       //Set anti flood timer
       g_canUse[client] = false;
-      CreateTimer(ANTI_FLOOD_TIME, Timer_ReEnableUsage, client);
+      CreateTimer(GetConVarFloat(cvar_antifloodtime), Timer_ReEnableUsage, client);
       
       DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
     }
@@ -247,7 +259,7 @@ public int glovesSubMenuHandler(Menu menu, MenuAction action, int client, int it
     
     //Set anti flood timer
     g_canUse[client] = false;
-    CreateTimer(ANTI_FLOOD_TIME, Timer_ReEnableUsage, client);
+    CreateTimer(GetConVarFloat(cvar_antifloodtime), Timer_ReEnableUsage, client);
     
     DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
   }
@@ -388,10 +400,18 @@ int GiveClientGloves(int client, int i)
 
     SetEntPropEnt(ent, Prop_Data, "m_hParent", client);
     SetEntPropEnt(ent, Prop_Data, "m_hOwnerEntity", client);
-    SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", client); //for thirdperson view
-    SetEntProp(client, Prop_Send, "m_nBody", 1); //for thirdperson view
+    
+    if (GetConVarBool(cvar_show_specmode)) {
+      SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", client); //for spec/thirdperson view
+      SetEntProp(client, Prop_Send, "m_nBody", 1); //for spec/thirdperson view
+    }
     
     DispatchSpawn(ent);
+    
+    //Hide model in third person view
+    if (GetConVarBool(cvar_hide_thirdperson)) {
+      SetEntityRenderMode(ent, RENDER_NONE);
+    }
   }
   
   //If default skin, reset these
@@ -530,6 +550,12 @@ public Action RestoreActiveWeapon(Handle timer, Handle pack)
    
   if (client != INVALID_ENT_REFERENCE && item != INVALID_ENT_REFERENCE) {
     SetEntPropEnt(client, Prop_Send, "m_hActiveWeapon", item);
+  }
+  
+  //Teleporting fixes floating arms with some (custom) player models
+  if(IsValidEdict(item)) {
+    float origin[3] = 0.0;
+    TeleportEntity(item, origin, NULL_VECTOR, NULL_VECTOR);
   }
   
   return Plugin_Stop;
