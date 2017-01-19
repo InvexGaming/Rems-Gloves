@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton  
-#define VERSION "1.03"
+#define VERSION "1.04"
 #define SERVER_LOCK_IP "45.121.211.57"
 
 public Plugin myinfo =
@@ -22,8 +22,7 @@ public Plugin myinfo =
 };
 
 //Convars
-ConVar cvar_show_specmode = null;
-ConVar cvar_hide_thirdperson = null;
+ConVar cvar_show_thirdperson = null;
 ConVar cvar_antifloodtime = null;
 
 //Definitions
@@ -44,6 +43,8 @@ int g_gloveCount = 1; //starts from 1, not 0
 int g_ClientGlove[MAXPLAYERS+1] = {0, ...};
 int g_ClientGloveEntities[MAXPLAYERS+1] = {-1, ...};
 bool g_canUse[MAXPLAYERS+1] = {true, ...}; //for anti-flood
+
+ArrayList whitelistModels;
 
 //Flags
 AdminFlag rgFlag = Admin_Custom3;
@@ -75,14 +76,15 @@ public void OnPluginStart()
   LoadTranslations("rg.phrases");
   
   //Convars
-  cvar_show_specmode = CreateConVar("sm_rg_specmode", "1", "Allow gloves to show when spectating other players (def. 1)");
-  cvar_hide_thirdperson = CreateConVar("sm_rg_hidethirdperson", "1", "Hide gloves in third person view mode, fixed some old custom skin bugs (def. 1)");
+  cvar_show_thirdperson = CreateConVar("sm_rg_showthirdperson", "1", "Show gloves in third person mode, 0: off, 1: all, 2: whitelist (def. 1)");
   cvar_antifloodtime = CreateConVar("sm_rg_antifloodtime", "2.0", "Speed at which clients can use the plugin (def. 2.0)");
   
   //Init array list
   categories = CreateArray(MAX_GLOVES);
+  whitelistModels = CreateArray(128);
   
-  //Read gloves config file
+  //Configuration
+  ReadCustomModelWhitelist();
   ReadGloveConfigFile();
   
   //Process players and set them up
@@ -382,7 +384,7 @@ int GiveClientGloves(int client, int i)
   //Remove current gloves
   RemoveClientGloves(client);
   
-  int ent = GivePlayerItem(client, "wearable_item");
+  int ent = CreateEntityByName("wearable_item");
   g_ClientGloveEntities[client] = ent;
   
   //Process non-default gloves
@@ -401,17 +403,36 @@ int GiveClientGloves(int client, int i)
     SetEntPropEnt(ent, Prop_Data, "m_hParent", client);
     SetEntPropEnt(ent, Prop_Data, "m_hOwnerEntity", client);
     
-    if (GetConVarBool(cvar_show_specmode)) {
-      SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", client); //for spec/thirdperson view
-      SetEntProp(client, Prop_Send, "m_nBody", 1); //for spec/thirdperson view
+    //Determine thirdperson mode and if thirdperson should be set for this client
+    int thirdPersonMode = GetConVarInt(cvar_show_thirdperson);
+    bool setThirdPerson = false;
+    
+    if (thirdPersonMode == 1)
+      setThirdPerson = true; //set for all
+    else if (thirdPersonMode == 2) {
+      //Get current client model
+      char clientCurrentModel[PLATFORM_MAX_PATH];
+      GetClientModel(client, clientCurrentModel, sizeof(clientCurrentModel));
+      
+      for (int j = 0; j < whitelistModels.Length; ++j) {
+        char modelName[PLATFORM_MAX_PATH];
+        whitelistModels.GetString(j, modelName, sizeof(modelName));
+        
+        if (StrEqual(clientCurrentModel, modelName, false)) {
+          //Whitelisted model, set thirdperson
+          setThirdPerson = true;
+          break;
+        }
+      }
+    }
+    
+    //Set third person
+    if (setThirdPerson) {
+      SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", client);
+      SetEntProp(client, Prop_Send, "m_nBody", 1);
     }
     
     DispatchSpawn(ent);
-    
-    //Hide model in third person view
-    if (GetConVarBool(cvar_hide_thirdperson)) {
-      SetEntityRenderMode(ent, RENDER_NONE);
-    }
   }
   
   //If default skin, reset these
@@ -458,6 +479,50 @@ public void OnClientDisconnect(int client)
   }
 }
 
+//Read model whitelist
+void ReadCustomModelWhitelist()
+{
+  char configFilePath[PLATFORM_MAX_PATH];
+  Format(configFilePath, sizeof(configFilePath), "configs/csgo_gloves_model_whitelist.txt");
+  BuildPath(Path_SM, configFilePath, PLATFORM_MAX_PATH, configFilePath);
+  
+  if (FileExists(configFilePath)) {
+    //Open config file
+    File file = OpenFile(configFilePath, "r");
+    
+    if (file != null) {
+      char buffer[PLATFORM_MAX_PATH];
+      
+      //For each file in the text file
+      while (file.ReadLine(buffer, sizeof(buffer))) {
+        //Remove final new line
+        //buffer length > 0 check needed in case file is completely empty and there is no new line '\n' char after empty string ""
+        if (strlen(buffer) > 0 && buffer[strlen(buffer) - 1] == '\n')
+          buffer[strlen(buffer) - 1] = '\0';
+        
+        //Remove any whitespace at either end
+        TrimString(buffer);
+        
+        //Ignore empty lines
+        if (strlen(buffer) == 0)
+          continue;
+          
+        //Ignore comment lines
+        if (StrContains(buffer, "//") == 0)
+          continue; 
+        
+        //Add to arraylist
+        whitelistModels.PushString(buffer);
+      }
+      
+      file.Close();
+    }
+  } else {
+    LogError("Missing required config file: '%s'", configFilePath);
+  }
+}
+
+//Read glove config file
 void ReadGloveConfigFile()
 {
   char sPath[PLATFORM_MAX_PATH];
@@ -511,28 +576,28 @@ void ReadGloveConfigFile()
   
   //Create submenus
   ClearArray(categories);
- 
+  
   char item[4];
   char categoryName[64];
   for (int i = 1; i < g_gloveCount; ++i) {
     int index = categories.FindString(g_gloves[i][category]);
     if (index == -1) {
       //Push
-      int newIndex = categories.PushString(g_gloves[i][category]);
+      index = categories.PushString(g_gloves[i][category]);
       
       //Add menu option
       Format(categoryName, sizeof(categoryName), "%s", g_gloves[i][category]);
       AddMenuItem(glovesMenu, categoryName, g_gloves[i][category]);
       
       //Create Menu
-      subMenus[newIndex] = CreateMenu(glovesSubMenuHandler);
-      SetMenuExitBackButton(subMenus[newIndex], true);
-      SetMenuTitle(subMenus[newIndex], "%s Gloves:", g_gloves[i][category]);
-    } else {
-      //Add item to submenu
-      Format(item, sizeof(item), "%i", i);
-      AddMenuItem(subMenus[index], item, g_gloves[i][listName]);
+      subMenus[index] = CreateMenu(glovesSubMenuHandler);
+      SetMenuExitBackButton(subMenus[index], true);
+      SetMenuTitle(subMenus[index], "%s Gloves:", g_gloves[i][category]);
     }
+    
+    //Add item to submenu
+    Format(item, sizeof(item), "%i", i);
+    AddMenuItem(subMenus[index], item, g_gloves[i][listName]);
   }
   
   SetMenuExitButton(glovesMenu, true);
