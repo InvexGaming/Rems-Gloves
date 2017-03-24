@@ -1,0 +1,45 @@
+"Games"
+{
+	"csgo"
+	{
+		"Offsets"
+		{
+			"RemoveAllWearables"
+			{
+				"windows"	"327"
+				"linux"		"328"
+			}
+			"EquipWearable"
+			{
+				"windows"	"333"
+				"linux"		"111"
+			}
+			"RemoveWearable"
+			{
+				"windows"	"334"
+				"linux"		"335"
+			}
+			"FindWearableInSlot"
+			{
+				"windows"	"335"
+				"linux"		"336"
+			}
+			"RemoveWearableInSlot"
+			{
+				"windows"	"336"
+				"linux"		"337"
+			}
+			"EquipSuit"
+			{
+				"windows"	"492"
+				"linux"		"493"
+			}
+			
+			"RemoveSuit"
+			{
+				"windows"	"493"
+				"linux"		"494"
+			}
+		}
+	}
+}
