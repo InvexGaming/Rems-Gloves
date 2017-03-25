@@ -8,8 +8,8 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-// Plugin Informaiton  
-#define VERSION "1.05"
+// Plugin Informaiton
+#define VERSION "1.06"
 #define SERVER_LOCK_IP "45.121.211.57"
 
 public Plugin myinfo =
@@ -28,6 +28,8 @@ ConVar cvar_antifloodtime = null;
 //Definitions
 #define CHAT_TAG_PREFIX "[{green}RG{default}] "
 #define MAX_GLOVES 50
+
+float MAP_BOUNDARY_POINT[3] = {16383.0, 16383.0, 16383.0};
 
 enum Listing
 {
@@ -292,9 +294,13 @@ public Action Timer_ReEnableUsage(Handle timer, int client)
 void RemoveClientGloves(int client)
 {
   if (IsClientConnected(client) && IsClientInGame(client) && IsPlayerAlive(client)) {
-    if (g_ClientGloveEntities[client] != -1 && IsWearable(g_ClientGloveEntities[client])) {
-      AcceptEntityInput(g_ClientGloveEntities[client], "Kill");
-      g_ClientGloveEntities[client] = -1;
+    if (g_ClientGloveEntities[client] != INVALID_ENT_REFERENCE) {
+      int ent = EntRefToEntIndex(g_ClientGloveEntities[client]);
+    
+      if (IsValidEntity(ent) && ent > 0) {
+        AcceptEntityInput(ent, "Kill");
+        g_ClientGloveEntities[client] = INVALID_ENT_REFERENCE;
+      }
     }
   }
 }
@@ -322,10 +328,10 @@ int GiveClientGloves(int client, int i)
   RemoveClientGloves(client);
   
   int ent = CreateEntityByName("wearable_item");
-  g_ClientGloveEntities[client] = ent;
+  g_ClientGloveEntities[client] = EntIndexToEntRef(ent);
   
   //Process non-default gloves
-  if (ent != -1 && IsWearable(ent) && (i != 0)) {
+  if (ent != -1 && i != 0) {
     SetEntPropEnt(ent, Prop_Send, "m_hOwnerEntity", client);
     SetEntityModel(ent, g_gloves[i][worldModel]);
     SetEntProp(ent, Prop_Send, "m_nModelIndex", PrecacheModel(g_gloves[i][worldModel]));
@@ -374,17 +380,21 @@ int GiveClientGloves(int client, int i)
     //Set third person
     if (!setThirdPerson) {
       //TODO: This is a poor method, improve it
-      SetEntityRenderMode(ent, RENDER_NONE);
+      //Teleport gloves to unplayable area in map to hide them
+      SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", -1);
+      TeleportEntity(ent, MAP_BOUNDARY_POINT, NULL_VECTOR, NULL_VECTOR);
+      SetEntProp(client, Prop_Send, "m_nBody", 0);
+    }
+  }  
+  
+  //Send a client refresh to all players
+  //This will refresh viewmodel for them updating gloves
+  //Also avoids 'glove stack' bug if gloves changed mid round
+  for (int k = 1; k < MaxClients; ++k) {
+    if (IsClientConnected(k) && IsClientInGame(k) && !IsFakeClient(k)) {
+      ForceClientRefresh(client, k);
     }
   }
-  
-  //If default skin, reset this
-  if (i == 0) {
-    SetEntProp(client, Prop_Send, "m_nBody", 0);
-  }
-  
-  //Send a client refresh so they see changes
-  ForceClientRefresh(client);
   
   return i;
 }
@@ -399,14 +409,14 @@ public void OnClientCookiesCached(int client)
 //Clean up when client disconnects
 public void OnClientDisconnect(int client)
 { 
-  if(AreClientCookiesCached(client)) {
+  if (AreClientCookiesCached(client)) {
     char index[4];
     IntToString(g_ClientGlove[client], index, sizeof(index));
     SetClientCookie(client, c_GloveIndex, index);
   }
   
   g_ClientGlove[client] = 0;
-  g_ClientGloveEntities[client] = -1;
+  g_ClientGloveEntities[client] = INVALID_ENT_REFERENCE;
 }
 
 //Read model whitelist
@@ -546,31 +556,14 @@ void ReadGloveConfigFile()
   SetMenuExitButton(glovesMenu, true);
 }
 
-//Check if IsWearable
-stock bool IsWearable(int entity)
-{
-	static char weaponclass[32];
-  
-	if(!IsValidEdict(entity))
-    return false;
-  
-	if (!GetEdictClassname(entity, weaponclass, sizeof(weaponclass)))
-    return false;
-    
-	if(StrContains(weaponclass, "wearable", false) == -1)
-    return false;
-  
-	return true;
-}
-
 //Force client to refresh models etc by faking a player spawn event
-stock void ForceClientRefresh(int client)
+stock void ForceClientRefresh(int playerToRefresh, int fireTo)
 {
   Event event = CreateEvent("player_spawn", true);
 
   if (event != null) {
-    event.SetInt("userid", GetClientUserId(client));
-    event.FireToClient(client);
+    event.SetInt("userid", GetClientUserId(playerToRefresh));
+    event.FireToClient(fireTo);
     event.Cancel();
   }
 }
