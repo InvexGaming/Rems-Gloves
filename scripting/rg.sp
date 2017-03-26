@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.06"
+#define VERSION "1.07"
 #define SERVER_LOCK_IP "45.121.211.57"
 
 public Plugin myinfo =
@@ -22,14 +22,13 @@ public Plugin myinfo =
 };
 
 //Convars
-ConVar cvar_show_thirdperson = null;
 ConVar cvar_antifloodtime = null;
 
 //Definitions
 #define CHAT_TAG_PREFIX "[{green}RG{default}] "
 #define MAX_GLOVES 50
-
-float MAP_BOUNDARY_POINT[3] = {16383.0, 16383.0, 16383.0};
+#define RANDOM_GLOVES -1
+#define DEFAULT_GLOVES 0
 
 enum Listing
 {
@@ -46,8 +45,6 @@ int g_gloveCount = 1; //starts from 1, not 0
 int g_ClientGlove[MAXPLAYERS+1] = {0, ...};
 int g_ClientGloveEntities[MAXPLAYERS+1] = {-1, ...};
 bool g_canUse[MAXPLAYERS+1] = {true, ...}; //for anti-flood
-
-ArrayList whitelistModels;
 
 //Flags
 AdminFlag rgFlag = Admin_Custom3;
@@ -82,8 +79,7 @@ public void OnPluginStart()
   LoadTranslations("rg.phrases");
   
   //Convars
-  cvar_show_thirdperson = CreateConVar("sm_rg_showthirdperson", "1", "Show gloves in third person mode, 0: off, 1: all, 2: whitelist (def. 1)");
-  cvar_antifloodtime = CreateConVar("sm_rg_antifloodtime", "2.0", "Speed at which clients can use the plugin (def. 2.0)");
+  cvar_antifloodtime = CreateConVar("sm_rg_antifloodtime", "0.75", "Speed at which clients can use the plugin (def. 2.0)");
   
   //Prepare SDK call values
   Handle hConfig = LoadGameConfigFile("wearables.games");
@@ -95,10 +91,8 @@ public void OnPluginStart()
   
   //Init array list
   categories = CreateArray(MAX_GLOVES);
-  whitelistModels = CreateArray(128);
   
   //Configuration
-  ReadCustomModelWhitelist();
   ReadGloveConfigFile();
   
   //Process players and set them up
@@ -208,12 +202,26 @@ public void ShowGlovesMenu(int client)
 
 public int glovesMenuHandler(Menu menu, MenuAction action, int client, int itemNum)
 {
-  if (action == MenuAction_Select) {
-    char categoryName[64];
-    GetMenuItem(menu, itemNum, categoryName, sizeof(categoryName));
-    
-    //Show menu based on category
-    int index = categories.FindString(categoryName);
+  //Get menu info
+  char info[64];
+  char display[64];
+  GetMenuItem(menu, itemNum, info, sizeof(info), _, display, sizeof(display));
+
+  if (action == MenuAction_DrawItem) {
+    if (g_ClientGlove[client] == DEFAULT_GLOVES && StrEqual(display, "Default Gloves"))
+      return ITEMDRAW_DISABLED;
+  }
+  else if (action == MenuAction_DisplayItem) {
+    if (g_ClientGlove[client] == DEFAULT_GLOVES && StrEqual(display, "Default Gloves")) {
+      //Change selected text
+      char equipedText[64];
+      Format(equipedText, sizeof(equipedText), "%s [*]", display);
+      return RedrawMenuItem(equipedText);
+    }
+  }
+  else if (action == MenuAction_Select) {
+    //Show menu based on category name (provided as info)
+    int index = categories.FindString(info);
     if (index != -1) {
       DisplayMenu(subMenus[index], client, MENU_TIME_FOREVER);
     }
@@ -250,22 +258,37 @@ public int glovesMenuHandler(Menu menu, MenuAction action, int client, int itemN
 
 public int glovesSubMenuHandler(Menu menu, MenuAction action, int client, int itemNum)
 {
-  if (action == MenuAction_Select) {
+  //Get menu info
+  char info[64];
+  char display[64];
+  GetMenuItem(menu, itemNum, info, sizeof(info), _, display, sizeof(display));
+  int selectedIndex = StringToInt(info);
+  
+  if (action == MenuAction_DrawItem) {
+    if (g_ClientGlove[client] == selectedIndex)
+      return ITEMDRAW_DISABLED;
+  }
+  else if (action == MenuAction_DisplayItem) {
+    if (g_ClientGlove[client] == selectedIndex) {
+      //Change selected text
+      char equipedText[64];
+      Format(equipedText, sizeof(equipedText), "%s [*]", display);
+      return RedrawMenuItem(equipedText);
+    }
+  }
+  else if (action == MenuAction_Select) {
     if (!g_canUse[client]) {
       CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Anti Flood Message");
       DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
       return 0;
     }
-    
-    char itemStr[64];
-    GetMenuItem(menu, itemNum, itemStr, sizeof(itemStr));
-    int item = StringToInt(itemStr);
   
-    GiveClientGloves(client, item);
+    //Give client selected gloves
+    GiveClientGloves(client, selectedIndex);
     
     //Print Chat Option
     char fullGloveName[64];
-    Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_gloves[item][category], g_gloves[item][skinName]);
+    Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_gloves[selectedIndex][category], g_gloves[selectedIndex][skinName]);
     CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
     
     //Set anti flood timer
@@ -327,65 +350,38 @@ int GiveClientGloves(int client, int i)
   //Remove current gloves
   RemoveClientGloves(client);
   
-  int ent = CreateEntityByName("wearable_item");
-  g_ClientGloveEntities[client] = EntIndexToEntRef(ent);
-  
-  //Process non-default gloves
-  if (ent != -1 && i != 0) {
-    SetEntPropEnt(ent, Prop_Send, "m_hOwnerEntity", client);
-    SetEntityModel(ent, g_gloves[i][worldModel]);
-    SetEntProp(ent, Prop_Send, "m_nModelIndex", PrecacheModel(g_gloves[i][worldModel]));
-    SetEntProp(ent, Prop_Send, "m_iTeamNum", GetClientTeam(client));
-    SetEntProp(client, Prop_Send, "m_nBody", 1);
+  //If non-default gloves
+  if (i != 0) {
+    int ent = CreateEntityByName("wearable_item");
+    g_ClientGloveEntities[client] = EntIndexToEntRef(ent);
     
-    //Set skin properties
-    SetEntProp(ent, Prop_Send, "m_bInitialized", 1); //removed wearable error message
-    SetEntProp(ent, Prop_Send,  "m_iAccountID", GetSteamAccountID(client));
-    SetEntProp(ent, Prop_Send, "m_iItemIDLow", 2048);
-    SetEntProp(ent, Prop_Send, "m_iEntityQuality", 4);
-    SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", g_gloves[i][ItemDefinitionIndex]);
-    SetEntProp(ent, Prop_Send,  "m_nFallbackPaintKit", g_gloves[i][FallbackPaintKit]);
-    SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", g_gloves[i][wear]);
-    
-    SetVariantString("!activator");
-    ActivateEntity(ent);
-    
-    //Determine thirdperson mode and if thirdperson should be set for this client
-    int thirdPersonMode = GetConVarInt(cvar_show_thirdperson);
-    bool setThirdPerson = false;
-    
-    if (thirdPersonMode == 1)
-      setThirdPerson = true; //set for all
-    else if (thirdPersonMode == 2) {
-      //Get current client model
-      char clientCurrentModel[PLATFORM_MAX_PATH];
-      GetClientModel(client, clientCurrentModel, sizeof(clientCurrentModel));
+    //Process non-default gloves
+    if (ent != -1) {
+      SetEntPropEnt(ent, Prop_Send, "m_hOwnerEntity", client);
+      SetEntityModel(ent, g_gloves[i][worldModel]);
+      SetEntProp(ent, Prop_Send, "m_nModelIndex", PrecacheModel(g_gloves[i][worldModel]));
+      SetEntProp(ent, Prop_Send, "m_iTeamNum", GetClientTeam(client));
+      SetEntProp(client, Prop_Send, "m_nBody", 1);
       
-      for (int j = 0; j < whitelistModels.Length; ++j) {
-        char modelName[PLATFORM_MAX_PATH];
-        whitelistModels.GetString(j, modelName, sizeof(modelName));
-        
-        if (StrEqual(clientCurrentModel, modelName, false)) {
-          //Whitelisted model, set thirdperson
-          setThirdPerson = true;
-          break;
-        }
-      }
+      //Set skin properties
+      SetEntProp(ent, Prop_Send, "m_bInitialized", 1); //removed wearable error message
+      SetEntProp(ent, Prop_Send,  "m_iAccountID", GetSteamAccountID(client));
+      SetEntProp(ent, Prop_Send, "m_iItemIDLow", 2048);
+      SetEntProp(ent, Prop_Send, "m_iEntityQuality", 4);
+      SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", g_gloves[i][ItemDefinitionIndex]);
+      SetEntProp(ent, Prop_Send,  "m_nFallbackPaintKit", g_gloves[i][FallbackPaintKit]);
+      SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", g_gloves[i][wear]);
+      
+      SetVariantString("!activator");
+      ActivateEntity(ent);
+     
+      //Call SDK function to give wearable
+      SDKCall(g_hGiveWearableCall, client, ent);
     }
-   
-    //Call SDK function to give wearable
-    SDKCall(g_hGiveWearableCall, client, ent);
-    DispatchKeyValue(ent, "effects", "4225");
-    
-    //Set third person
-    if (!setThirdPerson) {
-      //TODO: This is a poor method, improve it
-      //Teleport gloves to unplayable area in map to hide them
-      SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", -1);
-      TeleportEntity(ent, MAP_BOUNDARY_POINT, NULL_VECTOR, NULL_VECTOR);
-      SetEntProp(client, Prop_Send, "m_nBody", 0);
-    }
-  }  
+  } else {
+    //Reset this for default gloves
+    SetEntProp(client, Prop_Send, "m_nBody", 0);
+  }
   
   //Send a client refresh to all players
   //This will refresh viewmodel for them updating gloves
@@ -419,49 +415,6 @@ public void OnClientDisconnect(int client)
   g_ClientGloveEntities[client] = INVALID_ENT_REFERENCE;
 }
 
-//Read model whitelist
-void ReadCustomModelWhitelist()
-{
-  char configFilePath[PLATFORM_MAX_PATH];
-  Format(configFilePath, sizeof(configFilePath), "configs/csgo_gloves_model_whitelist.txt");
-  BuildPath(Path_SM, configFilePath, PLATFORM_MAX_PATH, configFilePath);
-  
-  if (FileExists(configFilePath)) {
-    //Open config file
-    File file = OpenFile(configFilePath, "r");
-    
-    if (file != null) {
-      char buffer[PLATFORM_MAX_PATH];
-      
-      //For each file in the text file
-      while (file.ReadLine(buffer, sizeof(buffer))) {
-        //Remove final new line
-        //buffer length > 0 check needed in case file is completely empty and there is no new line '\n' char after empty string ""
-        if (strlen(buffer) > 0 && buffer[strlen(buffer) - 1] == '\n')
-          buffer[strlen(buffer) - 1] = '\0';
-        
-        //Remove any whitespace at either end
-        TrimString(buffer);
-        
-        //Ignore empty lines
-        if (strlen(buffer) == 0)
-          continue;
-          
-        //Ignore comment lines
-        if (StrContains(buffer, "//") == 0)
-          continue; 
-        
-        //Add to arraylist
-        whitelistModels.PushString(buffer);
-      }
-      
-      file.Close();
-    }
-  } else {
-    LogError("Missing required config file: '%s'", configFilePath);
-  }
-}
-
 //Read glove config file
 void ReadGloveConfigFile()
 {
@@ -484,7 +437,7 @@ void ReadGloveConfigFile()
     {
       //Get glove family information
       char gloveCategory[64];
-      kv.GetSectionName(gloveCategory, sizeof(gloveCategory));
+      kv.GetSectionName(gloveCategory, sizeof(gloveCategory));      
       int m_iItemDefinitionIndex = kv.GetNum("ItemDefinitionIndex");
       char model_world[PLATFORM_MAX_PATH];
       kv.GetString("model_world", model_world, sizeof(model_world));
@@ -519,13 +472,16 @@ void ReadGloveConfigFile()
     glovesMenu = null;
   }
   
-  glovesMenu = CreateMenu(glovesMenuHandler);
+  glovesMenu = CreateMenu(glovesMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
   SetMenuTitle(glovesMenu, "%t", "Menu title");
-   
-  AddMenuItem(glovesMenu, "-1", "Random Gloves");
-  AddMenuItem(glovesMenu, "0", "Default Gloves");
-  Format(g_gloves[0][skinName], 64, "Default");
-  Format(g_gloves[0][category], 64, "CSGO");
+  
+  char numStrBuffer[3];
+  IntToString(RANDOM_GLOVES, numStrBuffer, sizeof(numStrBuffer));
+  AddMenuItem(glovesMenu, numStrBuffer, "Random Gloves");
+  IntToString(DEFAULT_GLOVES, numStrBuffer, sizeof(numStrBuffer));
+  AddMenuItem(glovesMenu, numStrBuffer, "Default Gloves");
+  Format(g_gloves[DEFAULT_GLOVES][skinName], 64, "Default");
+  Format(g_gloves[DEFAULT_GLOVES][category], 64, "CSGO");
   
   //Create submenus
   ClearArray(categories);
@@ -543,7 +499,7 @@ void ReadGloveConfigFile()
       AddMenuItem(glovesMenu, categoryName, g_gloves[i][category]);
       
       //Create Menu
-      subMenus[index] = CreateMenu(glovesSubMenuHandler);
+      subMenus[index] = CreateMenu(glovesSubMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
       SetMenuExitBackButton(subMenus[index], true);
       SetMenuTitle(subMenus[index], "%s Gloves:", g_gloves[i][category]);
     }
