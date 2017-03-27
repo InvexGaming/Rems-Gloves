@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.07"
+#define VERSION "1.08"
 #define SERVER_LOCK_IP "45.121.211.57"
 
 public Plugin myinfo =
@@ -29,6 +29,40 @@ ConVar cvar_antifloodtime = null;
 #define MAX_GLOVES 50
 #define RANDOM_GLOVES -1
 #define DEFAULT_GLOVES 0
+
+static char szGloveSleeves[][] = 
+{
+	"models/weapons/v_models/arms/anarchist/v_sleeve_anarchist.mdl", 
+	"models/weapons/v_models/arms/balkan/v_sleeve_balkan.mdl", 
+	"models/weapons/v_models/arms/fbi/v_sleeve_fbi.mdl", 
+	"models/weapons/v_models/arms/gign/v_sleeve_gign.mdl", 
+	"models/weapons/v_models/arms/gsg9/v_sleeve_gsg9.mdl", 
+	"models/weapons/v_models/arms/idf/v_sleeve_idf.mdl", 
+	"models/weapons/v_models/arms/pirate/v_pirate_watch.mdl", 
+	"models/weapons/v_models/arms/professional/v_sleeve_professional.mdl", 
+	"models/weapons/v_models/arms/sas/v_sleeve_sas.mdl", 
+	"models/weapons/v_models/arms/separatist/v_sleeve_separatist.mdl", 
+	"models/weapons/v_models/arms/st6/v_sleeve_st6.mdl", 
+	"models/weapons/v_models/arms/swat/v_sleeve_swat.mdl"
+};
+
+static char szNormalSleeves[][] = 
+{
+	"models/weapons/t_arms_anarchist.mdl", 
+	"models/weapons/t_arms_pirate.mdl", 
+	"models/weapons/t_arms_professional.mdl", 
+	"models/weapons/t_arms_separatist.mdl", 
+	"models/weapons/t_arms_balkan.mdl", 
+	"models/weapons/t_arms_leet.mdl", 
+	"models/weapons/t_arms_phoenix.mdl", 
+	"models/weapons/ct_arms_gign.mdl", 
+	"models/weapons/ct_arms_gsg9.mdl", 
+	"models/weapons/ct_arms_st6.mdl", 
+	"models/weapons/ct_arms_fbi.mdl", 
+	"models/weapons/ct_arms_idf.mdl", 
+	"models/weapons/ct_arms_sas.mdl", 
+	"models/weapons/ct_arms_swat.mdl"
+};
 
 enum Listing
 {
@@ -107,6 +141,22 @@ public void OnPluginStart()
   
   //Create config file
   AutoExecConfig(true, "rg");
+}
+
+public void OnMapStart()
+{
+  //Precache arms models
+	int iGlovesSleeves = sizeof(szGloveSleeves);
+	for (int i = 0; i < iGlovesSleeves; i++) {
+		PrecacheModel(szGloveSleeves[i], true);
+	}
+	
+	int iNormalSleeves = sizeof(szNormalSleeves);
+	for (int i = 0; i < iNormalSleeves; i++) {
+		PrecacheModel(szNormalSleeves[i], true);
+	}
+	
+	PrecacheModel("models/weapons/v_models/arms/bare/v_bare_hands.mdl", true);
 }
 
 public void OnPluginEnd()
@@ -350,6 +400,9 @@ int GiveClientGloves(int client, int i)
   //Remove current gloves
   RemoveClientGloves(client);
   
+  //Update the clients sleeves to use a gloves supporting arms model
+  UpdateClientSleeves(client);
+  
   //If non-default gloves
   if (i != 0) {
     int ent = CreateEntityByName("wearable_item");
@@ -521,5 +574,40 @@ stock void ForceClientRefresh(int playerToRefresh, int fireTo)
     event.SetInt("userid", GetClientUserId(playerToRefresh));
     event.FireToClient(fireTo);
     event.Cancel();
+  }
+}
+
+//Update a clients gloves based on which default arm model they are using
+stock void UpdateClientSleeves(int client)
+{
+  char m_szArmsModel[PLATFORM_MAX_PATH];
+  GetEntPropString(client, Prop_Send, "m_szArmsModel", m_szArmsModel, sizeof(m_szArmsModel));
+  
+  bool bUsingDefaultGloves = (g_ClientGlove[client] == DEFAULT_GLOVES) ? true : false;
+  
+  //Search for a normal sleves match
+  int iNormalSleeves = sizeof(szGloveSleeves);
+  for (int i = 0; i < iNormalSleeves; ++i) {
+    if (StrEqual(m_szArmsModel, szNormalSleeves[i], false)) {
+      //If were not using default gloves, we need to update to the glove sleeve version
+      if (!bUsingDefaultGloves) {
+        SetEntPropString(client, Prop_Send, "m_szArmsModel", szGloveSleeves[i]);
+      }
+      
+      return;
+    }
+  }
+  
+  //Search for a gloves sleves match
+  int iGlovesSleeves = sizeof(szGloveSleeves);
+  for (int i = 0; i < iGlovesSleeves; ++i) {
+    if (StrEqual(m_szArmsModel, szGloveSleeves[i], false)) {
+      //If were using default gloves, we need to update to the normal sleeve version
+      if (bUsingDefaultGloves) {
+        SetEntPropString(client, Prop_Send, "m_szArmsModel", szNormalSleeves[i]);
+      }
+      
+      return;
+    }
   }
 }
