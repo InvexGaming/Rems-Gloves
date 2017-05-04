@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.08"
+#define VERSION "1.09"
 #define SERVER_LOCK_IP "45.121.211.57"
 
 public Plugin myinfo =
@@ -32,36 +32,36 @@ ConVar cvar_antifloodtime = null;
 
 static char szGloveSleeves[][] = 
 {
-	"models/weapons/v_models/arms/anarchist/v_sleeve_anarchist.mdl", 
-	"models/weapons/v_models/arms/balkan/v_sleeve_balkan.mdl", 
-	"models/weapons/v_models/arms/fbi/v_sleeve_fbi.mdl", 
-	"models/weapons/v_models/arms/gign/v_sleeve_gign.mdl", 
-	"models/weapons/v_models/arms/gsg9/v_sleeve_gsg9.mdl", 
-	"models/weapons/v_models/arms/idf/v_sleeve_idf.mdl", 
-	"models/weapons/v_models/arms/pirate/v_pirate_watch.mdl", 
-	"models/weapons/v_models/arms/professional/v_sleeve_professional.mdl", 
-	"models/weapons/v_models/arms/sas/v_sleeve_sas.mdl", 
-	"models/weapons/v_models/arms/separatist/v_sleeve_separatist.mdl", 
-	"models/weapons/v_models/arms/st6/v_sleeve_st6.mdl", 
-	"models/weapons/v_models/arms/swat/v_sleeve_swat.mdl"
+  "models/weapons/v_models/arms/anarchist/v_sleeve_anarchist.mdl", 
+  "models/weapons/v_models/arms/balkan/v_sleeve_balkan.mdl", 
+  "models/weapons/v_models/arms/fbi/v_sleeve_fbi.mdl", 
+  "models/weapons/v_models/arms/gign/v_sleeve_gign.mdl", 
+  "models/weapons/v_models/arms/gsg9/v_sleeve_gsg9.mdl", 
+  "models/weapons/v_models/arms/idf/v_sleeve_idf.mdl", 
+  "models/weapons/v_models/arms/pirate/v_pirate_watch.mdl", 
+  "models/weapons/v_models/arms/professional/v_sleeve_professional.mdl", 
+  "models/weapons/v_models/arms/sas/v_sleeve_sas.mdl", 
+  "models/weapons/v_models/arms/separatist/v_sleeve_separatist.mdl", 
+  "models/weapons/v_models/arms/st6/v_sleeve_st6.mdl", 
+  "models/weapons/v_models/arms/swat/v_sleeve_swat.mdl"
 };
 
 static char szNormalSleeves[][] = 
 {
-	"models/weapons/t_arms_anarchist.mdl", 
-	"models/weapons/t_arms_pirate.mdl", 
-	"models/weapons/t_arms_professional.mdl", 
-	"models/weapons/t_arms_separatist.mdl", 
-	"models/weapons/t_arms_balkan.mdl", 
-	"models/weapons/t_arms_leet.mdl", 
-	"models/weapons/t_arms_phoenix.mdl", 
-	"models/weapons/ct_arms_gign.mdl", 
-	"models/weapons/ct_arms_gsg9.mdl", 
-	"models/weapons/ct_arms_st6.mdl", 
-	"models/weapons/ct_arms_fbi.mdl", 
-	"models/weapons/ct_arms_idf.mdl", 
-	"models/weapons/ct_arms_sas.mdl", 
-	"models/weapons/ct_arms_swat.mdl"
+  "models/weapons/t_arms_anarchist.mdl", 
+  "models/weapons/t_arms_pirate.mdl", 
+  "models/weapons/t_arms_professional.mdl", 
+  "models/weapons/t_arms_separatist.mdl", 
+  "models/weapons/t_arms_balkan.mdl", 
+  "models/weapons/t_arms_leet.mdl", 
+  "models/weapons/t_arms_phoenix.mdl", 
+  "models/weapons/ct_arms_gign.mdl", 
+  "models/weapons/ct_arms_gsg9.mdl", 
+  "models/weapons/ct_arms_st6.mdl", 
+  "models/weapons/ct_arms_fbi.mdl", 
+  "models/weapons/ct_arms_idf.mdl", 
+  "models/weapons/ct_arms_sas.mdl", 
+  "models/weapons/ct_arms_swat.mdl"
 };
 
 enum Listing
@@ -146,17 +146,17 @@ public void OnPluginStart()
 public void OnMapStart()
 {
   //Precache arms models
-	int iGlovesSleeves = sizeof(szGloveSleeves);
-	for (int i = 0; i < iGlovesSleeves; i++) {
-		PrecacheModel(szGloveSleeves[i], true);
-	}
-	
-	int iNormalSleeves = sizeof(szNormalSleeves);
-	for (int i = 0; i < iNormalSleeves; i++) {
-		PrecacheModel(szNormalSleeves[i], true);
-	}
-	
-	PrecacheModel("models/weapons/v_models/arms/bare/v_bare_hands.mdl", true);
+  int iGlovesSleeves = sizeof(szGloveSleeves);
+  for (int i = 0; i < iGlovesSleeves; i++) {
+    PrecacheModel(szGloveSleeves[i], true);
+  }
+  
+  int iNormalSleeves = sizeof(szNormalSleeves);
+  for (int i = 0; i < iNormalSleeves; i++) {
+    PrecacheModel(szNormalSleeves[i], true);
+  }
+  
+  PrecacheModel("models/weapons/v_models/arms/bare/v_bare_hands.mdl", true);
 }
 
 public void OnPluginEnd()
@@ -439,7 +439,7 @@ int GiveClientGloves(int client, int i)
   //Send a client refresh to all players
   //This will refresh viewmodel for them updating gloves
   //Also avoids 'glove stack' bug if gloves changed mid round
-  for (int k = 1; k < MaxClients; ++k) {
+  for (int k = 1; k <= MaxClients; ++k) {
     if (IsClientConnected(k) && IsClientInGame(k) && !IsFakeClient(k)) {
       ForceClientRefresh(client, k);
     }
