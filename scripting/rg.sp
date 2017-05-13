@@ -9,28 +9,31 @@
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.09"
-#define SERVER_LOCK_IP "45.121.211.57"
+#define VERSION "1.10"
 
 public Plugin myinfo =
 {
-  name = "CS:GO VIP Plugin (rg)",
+  name = "Rems Gloves (!rg)",
   author = "Invex | Byte",
-  description = "Special actions for VIP players.",
+  description = "Provides official Valve gloves to players.",
   version = VERSION,
   url = "http://www.invexgaming.com.au"
 };
 
 //Convars
-ConVar cvar_antifloodtime = null;
+ConVar g_Cvar_AntiFloodTime = null;
+ConVar g_Cvar_VipFlag = null;
 
 //Definitions
 #define CHAT_TAG_PREFIX "[{green}RG{default}] "
 #define MAX_GLOVES 50
+#define SKIN_MAX_LENGTH 64
+#define CATEGORY_MAX_LENGTH 64
 #define RANDOM_GLOVES -1
 #define DEFAULT_GLOVES 0
+#define MAX_MENU_OPTIONS 8
 
-static char szGloveSleeves[][] = 
+static char s_GloveSleeves[][] = 
 {
   "models/weapons/v_models/arms/anarchist/v_sleeve_anarchist.mdl", 
   "models/weapons/v_models/arms/balkan/v_sleeve_balkan.mdl", 
@@ -46,7 +49,7 @@ static char szGloveSleeves[][] =
   "models/weapons/v_models/arms/swat/v_sleeve_swat.mdl"
 };
 
-static char szNormalSleeves[][] = 
+static char s_NormalSleeves[][] = 
 {
   "models/weapons/t_arms_anarchist.mdl", 
   "models/weapons/t_arms_pirate.mdl", 
@@ -64,96 +67,110 @@ static char szNormalSleeves[][] =
   "models/weapons/ct_arms_swat.mdl"
 };
 
-enum Listing
+enum GloveStruct
 {
-  String:skinName[64],
-  String:category[64],
+  String:skinName[SKIN_MAX_LENGTH],
+  String:category[CATEGORY_MAX_LENGTH],
   String:worldModel[PLATFORM_MAX_PATH],
   ItemDefinitionIndex,
   FallbackPaintKit,
   Float:wear
 }
 
-int g_gloves[MAX_GLOVES][Listing];
-int g_gloveCount = 1; //starts from 1, not 0
+int g_Gloves[MAX_GLOVES][GloveStruct];
+int g_GloveCount = 1; //starts from 1, not 0
 int g_ClientGlove[MAXPLAYERS+1] = {0, ...};
 int g_ClientGloveEntities[MAXPLAYERS+1] = {-1, ...};
-bool g_canUse[MAXPLAYERS+1] = {true, ...}; //for anti-flood
-
-//Flags
-AdminFlag rgFlag = Admin_Custom3;
+bool g_CanUse[MAXPLAYERS+1] = {true, ...}; //for anti-flood
 
 //Menu
-Menu glovesMenu = null;
-ArrayList categories;
-Menu subMenus[MAX_GLOVES];
+Menu g_GloveMenu = null;
+ArrayList g_Categories;
+Menu g_SubMenus[MAX_GLOVES];
+int g_NumSubMenus = 0;
 
 //Cookies
-Handle c_GloveIndex = null;
+Handle g_GloveIndexCookie = null;
 
 //SDKCall
-Handle g_hGiveWearableCall = null;
+Handle g_GiveWearableCall = null;
+
+//Lateload
+bool g_LateLoaded = false;
+
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+  g_LateLoaded = late;
+  return APLRes_Success;
+}
 
 public void OnPluginStart()
 {
-  //Anti-share
-  if (strcmp(SERVER_LOCK_IP, "") != 0) {
-    char m_szIP[64];
-    int m_unIP = GetConVarInt(FindConVar("hostip"));
-    Format(m_szIP, sizeof(m_szIP), "%d.%d.%d.%d", (m_unIP >> 24) & 0x000000FF, (m_unIP >> 16) & 0x000000FF, (m_unIP >> 8) & 0x000000FF, m_unIP & 0x000000FF);
-
-    if (strcmp(SERVER_LOCK_IP, m_szIP) != 0)
-      SetFailState("Nope.");
-  }
-  
-  //Store preferences in clienprefs
-  c_GloveIndex = RegClientCookie("rg_gloves_preference", "", CookieAccess_Private);
-  
   //Translations
   LoadTranslations("rg.phrases");
+
+  //Store preferences in clientprefs
+  g_GloveIndexCookie = RegClientCookie("rg_Gloves_preference", "", CookieAccess_Private);
   
   //Convars
-  cvar_antifloodtime = CreateConVar("sm_rg_antifloodtime", "0.75", "Speed at which clients can use the plugin (def. 2.0)");
+  g_Cvar_AntiFloodTime = CreateConVar("sm_rg_antifloodtime", "0.75", "Speed at which clients can use the plugin (def. 2.0)");
+  g_Cvar_VipFlag = CreateConVar("sm_rg_vipflag", "z", "Which flag to use for plugin access");
+    
+  //Create config file
+  AutoExecConfig(true, "rg");
+  
+  //Commands
+  RegConsoleCmd("sm_rg", Command_ShowGlovesMenu, "Show menu for glove selection");
+  RegConsoleCmd("sm_glove", Command_ShowGlovesMenu, "Show menu for glove selection");
+  RegConsoleCmd("sm_gloves", Command_ShowGlovesMenu, "Show menu for glove selection");
+  RegAdminCmd("sm_rg_reloadconfig", Command_ReloadConfig, ADMFLAG_ROOT, "Reload config file");
   
   //Prepare SDK call values
   Handle hConfig = LoadGameConfigFile("wearables.games");
+  if (hConfig == null)
+    SetFailState("Error loading wearables.games gamedata file.");
+  
   int iEquipOffset = GameConfGetOffset(hConfig, "EquipWearable");
+  if (iEquipOffset == -1)
+    SetFailState("Error getting EquipWearable offset.");
+  
   StartPrepSDKCall(SDKCall_Player);
   PrepSDKCall_SetVirtual(iEquipOffset);
   PrepSDKCall_AddParameter(SDKType_CBaseEntity, SDKPass_Pointer);
-  g_hGiveWearableCall = EndPrepSDKCall();
+  g_GiveWearableCall = EndPrepSDKCall();
   
   //Init array list
-  categories = CreateArray(MAX_GLOVES);
+  g_Categories = new ArrayList(CATEGORY_MAX_LENGTH);
   
   //Configuration
   ReadGloveConfigFile();
   
-  //Process players and set them up
-  for (int client = 1; client <= MaxClients; ++client) {
-    if (!IsClientInGame(client))
-      continue;
+  //Late load
+  if (g_LateLoaded) {
+    for (int i = 1; i <= MaxClients; ++i) {
+      if (IsClientInGame(i))
+        OnClientPutInServer(i);
+    }
     
-    OnClientPutInServer(client);
+    g_LateLoaded = false;
   }
   
+  //Hooks
   HookEvent("player_spawn", Event_PlayerSpawn);
-  
-  //Create config file
-  AutoExecConfig(true, "rg");
+  HookEvent("player_team", Event_PlayerTeam);
 }
 
 public void OnMapStart()
 {
   //Precache arms models
-  int iGlovesSleeves = sizeof(szGloveSleeves);
-  for (int i = 0; i < iGlovesSleeves; i++) {
-    PrecacheModel(szGloveSleeves[i], true);
+  int gloveSleeves = sizeof(s_GloveSleeves);
+  for (int i = 0; i < gloveSleeves; i++) {
+    PrecacheModel(s_GloveSleeves[i], true);
   }
   
-  int iNormalSleeves = sizeof(szNormalSleeves);
-  for (int i = 0; i < iNormalSleeves; i++) {
-    PrecacheModel(szNormalSleeves[i], true);
+  int normalSleeves = sizeof(s_NormalSleeves);
+  for (int i = 0; i < normalSleeves; i++) {
+    PrecacheModel(s_NormalSleeves[i], true);
   }
   
   PrecacheModel("models/weapons/v_models/arms/bare/v_bare_hands.mdl", true);
@@ -162,20 +179,22 @@ public void OnMapStart()
 public void OnPluginEnd()
 {
   for(int i = 1; i <= MaxClients; ++i) {
-    if (IsClientConnected(i) && IsClientInGame(i)) {
+    if (IsClientInGame(i)) {
       //Cookie saving
       OnClientDisconnect(i);
       
       //Removing gloves
       if (IsPlayerAlive(i))
         RemoveClientGloves(i);
+        
+      ForceClientRefreshAll(i);
     }
   }
 }
 
 public void OnClientPutInServer(int client)
 {
-  g_canUse[client] = true;
+  g_CanUse[client] = true;
 }
 
 public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
@@ -183,135 +202,147 @@ public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadca
   int client = GetClientOfUserId(event.GetInt("userid"));
   
   //Get VIP status
-  int isVIP = CheckCommandAccess(client, "", FlagToBit(rgFlag));
+  char buffer[2];
+  g_Cvar_VipFlag.GetString(buffer, sizeof(buffer));
+  bool isVip = ClientHasCharFlag(client, buffer[0]);
   
-  if (!isVIP) {
+  if (!isVip)
     return Plugin_Continue;
-  }
   
-  //Give player gloves post spawn
+  //Give player gloves post spawn if they have non-default gloves
   if (g_ClientGlove[client] != 0)
     GiveClientGloves(client, g_ClientGlove[client]);
   
   return Plugin_Continue;
 }
 
-//Monitor chat to capture commands
-public Action OnClientSayCommand(int client, const char[] command_t, const char[] sArgs)
+public Action Event_PlayerTeam(Event event, const char[] name, bool dontBroadcast)
 {
-  char command[32];
-  SplitString(sArgs, " ", command, sizeof(command));
+  int client = GetClientOfUserId(event.GetInt("userid"));
   
-  //If no spaces then user is calling command with no function
-  if (strcmp(command, "") == 0)
-    strcopy(command, sizeof(command), sArgs);
-  
-  //Check if command starts with following strings
-  if( StrEqual(command, "!gloves", false) ||
-      StrEqual(command, "!glove", false) ||
-      StrEqual(command, "!rg", false) ||
-      StrEqual(command, "/gloves", false) ||
-      StrEqual(command, "/glove", false) ||
-      StrEqual(command, "/rg", false)
-    )
-  {
-    //Get VIP status
-    int isVIP = CheckCommandAccess(client, "", FlagToBit(rgFlag));
-    
-    //Only VIPS can use this plugin unless you are setting the default skin
-    if (!isVIP) {
-      CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Must be VIP");
-      return Plugin_Handled;
-    }
-    
-    //Otherwise continue normally
-    ShowGlovesMenu(client);
-    
-    //Don't print this to chat
+  if (!(client > 0 && client <= MaxClients && IsClientInGame(client)))
     return Plugin_Handled;
+  
+  int toTeam = event.GetInt("team");
+  
+  if (toTeam == CS_TEAM_SPECTATOR || toTeam == CS_TEAM_NONE) {
+    //Body will be instantly removed so remove glove entities
+    RemoveClientGloves(client);
+    ForceClientRefreshAll(client);
   }
   
   return Plugin_Continue;
 }
 
-public void ShowGlovesMenu(int client)
+//Show Gloves Menu
+public Action Command_ShowGlovesMenu(int client, int args)
 {
-  if (!IsClientInGame(client))
-    return;
-    
+  //Get VIP status
+  char buffer[2];
+  g_Cvar_VipFlag.GetString(buffer, sizeof(buffer));
+  bool isVip = ClientHasCharFlag(client, buffer[0]);
+  
+  if (!isVip) {
+    CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Must be VIP");
+    return Plugin_Handled;
+  }
+  
+  //Otherwise continue normally
+  ShowGlovesMenu(client);
+  
+  return Plugin_Handled;
+}
+
+public void ShowGlovesMenu(int client)
+{    
   if (!(1 <= client <= MaxClients))
     return;
     
-  if (!IsPlayerAlive(client)) {
-    CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Must Be Alive");
+  if (!IsClientInGame(client))
     return;
-  }
   
-  DisplayMenu(glovesMenu, client, MENU_TIME_FOREVER);
+  g_GloveMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public int glovesMenuHandler(Menu menu, MenuAction action, int client, int itemNum)
+public int g_GloveMenuHandler(Menu menu, MenuAction action, int client, int param2)
 {
   //Get menu info
   char info[64];
   char display[64];
-  GetMenuItem(menu, itemNum, info, sizeof(info), _, display, sizeof(display));
+  menu.GetItem(param2, info, sizeof(info), _, display, sizeof(display));
 
   if (action == MenuAction_DrawItem) {
+    //Hacky way to set title
+    if (param2 % MAX_MENU_OPTIONS == 0) { 
+      char titleString[1024];
+      Format(titleString, sizeof(titleString), "%t (V%s)\n%t %s | %s\n ", "Menu Title", VERSION, "Menu Current Gloves Title", g_Gloves[g_ClientGlove[client]][category], g_Gloves[g_ClientGlove[client]][skinName]);
+      menu.SetTitle(titleString);
+    }
+    
     if (g_ClientGlove[client] == DEFAULT_GLOVES && StrEqual(display, "Default Gloves"))
       return ITEMDRAW_DISABLED;
   }
   else if (action == MenuAction_DisplayItem) {
     if (g_ClientGlove[client] == DEFAULT_GLOVES && StrEqual(display, "Default Gloves")) {
       //Change selected text
-      char equipedText[64];
+      char equipedText[CATEGORY_MAX_LENGTH + 5]; //4 bytes + 1 null terminator
       Format(equipedText, sizeof(equipedText), "%s [*]", display);
       return RedrawMenuItem(equipedText);
     }
   }
   else if (action == MenuAction_Select) {
     //Show menu based on category name (provided as info)
-    int index = categories.FindString(info);
+    int index = g_Categories.FindString(info);
     if (index != -1) {
-      DisplayMenu(subMenus[index], client, MENU_TIME_FOREVER);
+      g_SubMenus[index].Display(client, MENU_TIME_FOREVER);
     }
-    else if (itemNum == 0 || itemNum == 1) {
-      if (!g_canUse[client]) {
+    else if (param2 <= 1) { //first 2 options
+      if (!g_CanUse[client]) {
         CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Anti Flood Message");
-        DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+        menu.DisplayAt(client, 0, MENU_TIME_FOREVER);
         return 0;
       }
-    
+      
+      int item = -1;
+      
       //Subtract 1 as 0 is default and -1 is random
-      int item = GiveClientGloves(client, itemNum - 1);
+      if (IsPlayerAlive(client)) {
+        item = GiveClientGloves(client, param2 - 1); //Set and Equip
+      } else {
+        item = SetClientGloves(client, param2 - 1); //Only Set
+      }
       
       if (item != -1) {
         //Print Chat Option
-        char fullGloveName[64];
-        Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_gloves[item][category], g_gloves[item][skinName]);
-        CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
+        char fullGloveName[CATEGORY_MAX_LENGTH + SKIN_MAX_LENGTH + 4]; //3 bytes + 1 null terminator
+        Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_Gloves[item][category], g_Gloves[item][skinName]);
+        
+        if (IsPlayerAlive(client))
+          CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
+        else
+          CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove Dead", fullGloveName);
       }
       
       //Set anti flood timer
-      g_canUse[client] = false;
-      CreateTimer(GetConVarFloat(cvar_antifloodtime), Timer_ReEnableUsage, client);
+      g_CanUse[client] = false;
+      CreateTimer(g_Cvar_AntiFloodTime.FloatValue, Timer_ReEnableUsage, client);
       
-      DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+      menu.DisplayAt(client, 0, MENU_TIME_FOREVER);
     }
     else {
-      DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+      menu.DisplayAt(client, 0, MENU_TIME_FOREVER);
     }
   }
   
   return 0;
 }
 
-public int glovesSubMenuHandler(Menu menu, MenuAction action, int client, int itemNum)
+public int glovesSubMenuHandler(Menu menu, MenuAction action, int client, int param2)
 {
   //Get menu info
   char info[64];
   char display[64];
-  GetMenuItem(menu, itemNum, info, sizeof(info), _, display, sizeof(display));
+  GetMenuItem(menu, param2, info, sizeof(info), _, display, sizeof(display));
   int selectedIndex = StringToInt(info);
   
   if (action == MenuAction_DrawItem) {
@@ -321,37 +352,48 @@ public int glovesSubMenuHandler(Menu menu, MenuAction action, int client, int it
   else if (action == MenuAction_DisplayItem) {
     if (g_ClientGlove[client] == selectedIndex) {
       //Change selected text
-      char equipedText[64];
+      char equipedText[SKIN_MAX_LENGTH + 5]; //4 bytes + 1 null terminator
       Format(equipedText, sizeof(equipedText), "%s [*]", display);
       return RedrawMenuItem(equipedText);
     }
   }
   else if (action == MenuAction_Select) {
-    if (!g_canUse[client]) {
+    if (!g_CanUse[client]) {
       CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Anti Flood Message");
-      DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+      menu.DisplayAt(client, 0, MENU_TIME_FOREVER);
       return 0;
     }
   
-    //Give client selected gloves
-    GiveClientGloves(client, selectedIndex);
+    int item = -1;
     
-    //Print Chat Option
-    char fullGloveName[64];
-    Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_gloves[selectedIndex][category], g_gloves[selectedIndex][skinName]);
-    CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
+    if (IsPlayerAlive(client)) {
+      item = GiveClientGloves(client, selectedIndex); //Set and Equip
+    } else {
+      item = SetClientGloves(client, selectedIndex); //Only Set
+    }
+    
+    if (item != -1) {
+      //Print Chat Option
+      char fullGloveName[CATEGORY_MAX_LENGTH + SKIN_MAX_LENGTH + 4]; //3 bytes + 1 null terminator
+      Format(fullGloveName, sizeof(fullGloveName), "%s | %s", g_Gloves[item][category], g_Gloves[item][skinName]);
+      
+      if (IsPlayerAlive(client))
+        CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
+      else
+        CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove Dead", fullGloveName);
+    }
     
     //Set anti flood timer
-    g_canUse[client] = false;
-    CreateTimer(GetConVarFloat(cvar_antifloodtime), Timer_ReEnableUsage, client);
+    g_CanUse[client] = false;
+    CreateTimer(g_Cvar_AntiFloodTime.FloatValue, Timer_ReEnableUsage, client);
     
-    DisplayMenuAtItem(menu, client, 0, MENU_TIME_FOREVER);
+    menu.DisplayAt(client, 0, MENU_TIME_FOREVER);
   }
   else if (action == MenuAction_Cancel)
   {
-    if (itemNum == MenuCancel_ExitBack) {
+    if (param2 == MenuCancel_ExitBack) {
       //Goto main menu
-      DisplayMenuAtItem(glovesMenu, client, 0, 0);
+      g_GloveMenu.DisplayAt(client, 0, MENU_TIME_FOREVER);
     }
   }
   
@@ -361,12 +403,12 @@ public int glovesSubMenuHandler(Menu menu, MenuAction action, int client, int it
 //Re-enable ws for particular client
 public Action Timer_ReEnableUsage(Handle timer, int client)
 {
-  g_canUse[client] = true;
+  g_CanUse[client] = true;
 }
 
 void RemoveClientGloves(int client)
 {
-  if (IsClientConnected(client) && IsClientInGame(client) && IsPlayerAlive(client)) {
+  if (IsClientInGame(client) && IsPlayerAlive(client)) {
     if (g_ClientGloveEntities[client] != INVALID_ENT_REFERENCE) {
       int ent = EntRefToEntIndex(g_ClientGloveEntities[client]);
     
@@ -379,23 +421,39 @@ void RemoveClientGloves(int client)
 }
 
 //Returns index i (converting randomised indexes first)
-int GiveClientGloves(int client, int i)
+int SetClientGloves(int client, int i)
 {
-  if(!IsClientConnected(client) || !IsClientInGame(client) || !IsPlayerAlive(client) || IsFakeClient(client))
+  if(!IsClientInGame(client) || IsFakeClient(client))
     return -1;
     
   //Invalid index
-  if (i < -1 || i > g_gloveCount - 1)
+  if (i < -1 || i > g_GloveCount - 1)
     return -1;
-
+    
   //For randomised index
   //Keep picking random number until a different one is found
   if(i == -1) {
     while (i == g_ClientGlove[client] || i == -1)
-      i = GetRandomInt(1, g_gloveCount - 1);
+      i = GetRandomInt(1, g_GloveCount - 1);
   }
   
   g_ClientGlove[client] = i;
+  
+  return i;
+}
+
+//Give a client their gloves (set and give)
+int GiveClientGloves(int client, int i)
+{
+  if(!IsClientInGame(client) || !IsPlayerAlive(client) || IsFakeClient(client))
+    return -1;
+    
+  //Invalid index
+  if (i < -1 || i > g_GloveCount - 1)
+    return -1;
+
+  //Set client gloves
+  i = SetClientGloves(client, i);
   
   //Remove current gloves
   RemoveClientGloves(client);
@@ -411,8 +469,8 @@ int GiveClientGloves(int client, int i)
     //Process non-default gloves
     if (ent != -1) {
       SetEntPropEnt(ent, Prop_Send, "m_hOwnerEntity", client);
-      SetEntityModel(ent, g_gloves[i][worldModel]);
-      SetEntProp(ent, Prop_Send, "m_nModelIndex", PrecacheModel(g_gloves[i][worldModel]));
+      SetEntityModel(ent, g_Gloves[i][worldModel]);
+      SetEntProp(ent, Prop_Send, "m_nModelIndex", PrecacheModel(g_Gloves[i][worldModel]));
       SetEntProp(ent, Prop_Send, "m_iTeamNum", GetClientTeam(client));
       SetEntProp(client, Prop_Send, "m_nBody", 1);
       
@@ -421,15 +479,15 @@ int GiveClientGloves(int client, int i)
       SetEntProp(ent, Prop_Send,  "m_iAccountID", GetSteamAccountID(client));
       SetEntProp(ent, Prop_Send, "m_iItemIDLow", 2048);
       SetEntProp(ent, Prop_Send, "m_iEntityQuality", 4);
-      SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", g_gloves[i][ItemDefinitionIndex]);
-      SetEntProp(ent, Prop_Send,  "m_nFallbackPaintKit", g_gloves[i][FallbackPaintKit]);
-      SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", g_gloves[i][wear]);
+      SetEntProp(ent, Prop_Send, "m_iItemDefinitionIndex", g_Gloves[i][ItemDefinitionIndex]);
+      SetEntProp(ent, Prop_Send,  "m_nFallbackPaintKit", g_Gloves[i][FallbackPaintKit]);
+      SetEntPropFloat(ent, Prop_Send, "m_flFallbackWear", g_Gloves[i][wear]);
       
       SetVariantString("!activator");
       ActivateEntity(ent);
      
       //Call SDK function to give wearable
-      SDKCall(g_hGiveWearableCall, client, ent);
+      SDKCall(g_GiveWearableCall, client, ent);
     }
   } else {
     //Reset this for default gloves
@@ -439,11 +497,7 @@ int GiveClientGloves(int client, int i)
   //Send a client refresh to all players
   //This will refresh viewmodel for them updating gloves
   //Also avoids 'glove stack' bug if gloves changed mid round
-  for (int k = 1; k <= MaxClients; ++k) {
-    if (IsClientConnected(k) && IsClientInGame(k) && !IsFakeClient(k)) {
-      ForceClientRefresh(client, k);
-    }
-  }
+  ForceClientRefreshAll(client);
   
   return i;
 }
@@ -451,7 +505,7 @@ int GiveClientGloves(int client, int i)
 public void OnClientCookiesCached(int client)
 {
   char index[4];
-  GetClientCookie(client, c_GloveIndex, index, sizeof(index));
+  GetClientCookie(client, g_GloveIndexCookie, index, sizeof(index));
   g_ClientGlove[client] = StringToInt(index);
 }
 
@@ -461,27 +515,60 @@ public void OnClientDisconnect(int client)
   if (AreClientCookiesCached(client)) {
     char index[4];
     IntToString(g_ClientGlove[client], index, sizeof(index));
-    SetClientCookie(client, c_GloveIndex, index);
+    SetClientCookie(client, g_GloveIndexCookie, index);
   }
   
   g_ClientGlove[client] = 0;
   g_ClientGloveEntities[client] = INVALID_ENT_REFERENCE;
 }
 
+public Action Command_ReloadConfig(int client, int args)
+{
+  ReadGloveConfigFile();
+  CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Config Reloaded");
+  return Plugin_Handled;
+}
+
 //Read glove config file
 void ReadGloveConfigFile()
-{
-  char sPath[PLATFORM_MAX_PATH];
-  Format(sPath, sizeof(sPath), "configs/csgo_gloves.cfg");
-  BuildPath(Path_SM, sPath, sizeof(sPath), sPath);
+{ 
+  //Reset values
+  delete g_GloveMenu;
+  for (int i = 0; i < g_NumSubMenus; ++i) {
+    delete g_SubMenus[i];
+  }
   
-  if (!FileExists(sPath))
-    return;
+  g_GloveCount = 1; //starts at 1
+  g_NumSubMenus = 0;
   
-  KeyValues kv = CreateKeyValues("Gloves");
-  g_gloveCount = 1;
+  //Create main menu
+  g_GloveMenu = new Menu(g_GloveMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
+  g_GloveMenu.Pagination = MENU_NO_PAGINATION; //TODO: temp, remove this when more glove families are added
+  g_GloveMenu.ExitButton = true; //set after MENU_NO_PAGINATION is set. TODO: temp
   
-  if (!kv.ImportFromFile(sPath))
+  char numStrBuffer[3];
+  IntToString(RANDOM_GLOVES, numStrBuffer, sizeof(numStrBuffer));
+  g_GloveMenu.AddItem(numStrBuffer, "Random Gloves");  //Add Random Gloves option
+  IntToString(DEFAULT_GLOVES, numStrBuffer, sizeof(numStrBuffer));
+  g_GloveMenu.AddItem(numStrBuffer, "Default Gloves"); //Add Default Gloves option
+  Format(g_Gloves[DEFAULT_GLOVES][skinName], SKIN_MAX_LENGTH, "Default");
+  Format(g_Gloves[DEFAULT_GLOVES][category], CATEGORY_MAX_LENGTH, "CSGO");
+  
+  //Clear categories
+  g_Categories.Clear();
+  
+  //Search for config file
+  char path[PLATFORM_MAX_PATH];
+  Format(path, sizeof(path), "configs/rg.cfg");
+  BuildPath(Path_SM, path, sizeof(path), path);
+  
+  if (!FileExists(path)) {
+    SetFailState("Config file rg.cfg was not found");
+  }
+  
+  KeyValues kv = new KeyValues("Gloves");
+  
+  if (!kv.ImportFromFile(path))
     return;
   
   if(kv.GotoFirstSubKey(true))
@@ -489,24 +576,45 @@ void ReadGloveConfigFile()
     do
     {
       //Get glove family information
-      char gloveCategory[64];
+      char gloveCategory[CATEGORY_MAX_LENGTH];
       kv.GetSectionName(gloveCategory, sizeof(gloveCategory));      
       int m_iItemDefinitionIndex = kv.GetNum("ItemDefinitionIndex");
       char model_world[PLATFORM_MAX_PATH];
       kv.GetString("model_world", model_world, sizeof(model_world));
       
+      //Process catagory here if its a new category
+      int categoryIndex = g_Categories.FindString(gloveCategory);
+      if (categoryIndex == -1) {
+        //Push
+        categoryIndex = g_Categories.PushString(gloveCategory);
+        
+        //Add Menu Option
+        g_GloveMenu.AddItem(gloveCategory, gloveCategory);
+        
+        //Create Sub Menu
+        g_SubMenus[categoryIndex] = new Menu(glovesSubMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
+        g_SubMenus[categoryIndex].SetTitle("%s Gloves:", gloveCategory);
+        g_SubMenus[categoryIndex].ExitBackButton = true;
+        ++g_NumSubMenus;
+      }
+      
       //Iterate through skins
       if(kv.JumpToKey("skins", false)) {
         if(kv.GotoFirstSubKey(true)) {
           do {
-            Format(g_gloves[g_gloveCount][category], 64, gloveCategory);
-            g_gloves[g_gloveCount][ItemDefinitionIndex] = m_iItemDefinitionIndex;
-            Format(g_gloves[g_gloveCount][worldModel], PLATFORM_MAX_PATH, model_world);
-            kv.GetSectionName(g_gloves[g_gloveCount][skinName], 64);
-            g_gloves[g_gloveCount][FallbackPaintKit] = kv.GetNum("FallbackPaintKit");
-            g_gloves[g_gloveCount][wear] = kv.GetFloat("wear", 0.0001);
+            Format(g_Gloves[g_GloveCount][category], CATEGORY_MAX_LENGTH, gloveCategory);
+            g_Gloves[g_GloveCount][ItemDefinitionIndex] = m_iItemDefinitionIndex;
+            Format(g_Gloves[g_GloveCount][worldModel], PLATFORM_MAX_PATH, model_world);
+            kv.GetSectionName(g_Gloves[g_GloveCount][skinName], SKIN_MAX_LENGTH);
+            g_Gloves[g_GloveCount][FallbackPaintKit] = kv.GetNum("FallbackPaintKit");
+            g_Gloves[g_GloveCount][wear] = kv.GetFloat("wear", 0.0001);
           
-            ++g_gloveCount;
+            //Add this skin to its categories submenu
+            char item[4];
+            Format(item, sizeof(item), "%i", g_GloveCount);
+            g_SubMenus[categoryIndex].AddItem(item, g_Gloves[g_GloveCount][skinName]);
+          
+            ++g_GloveCount;
           } while (kv.GotoNextKey(true));
           kv.GoBack();
         }
@@ -518,51 +626,16 @@ void ReadGloveConfigFile()
   }
   
   delete kv;
-  
-  //Create (or update) the menu
-  if (glovesMenu != null) {
-    CloseHandle(glovesMenu);
-    glovesMenu = null;
-  }
-  
-  glovesMenu = CreateMenu(glovesMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
-  SetMenuTitle(glovesMenu, "%t", "Menu title");
-  
-  char numStrBuffer[3];
-  IntToString(RANDOM_GLOVES, numStrBuffer, sizeof(numStrBuffer));
-  AddMenuItem(glovesMenu, numStrBuffer, "Random Gloves");
-  IntToString(DEFAULT_GLOVES, numStrBuffer, sizeof(numStrBuffer));
-  AddMenuItem(glovesMenu, numStrBuffer, "Default Gloves");
-  Format(g_gloves[DEFAULT_GLOVES][skinName], 64, "Default");
-  Format(g_gloves[DEFAULT_GLOVES][category], 64, "CSGO");
-  
-  //Create submenus
-  ClearArray(categories);
-  
-  char item[4];
-  char categoryName[64];
-  for (int i = 1; i < g_gloveCount; ++i) {
-    int index = categories.FindString(g_gloves[i][category]);
-    if (index == -1) {
-      //Push
-      index = categories.PushString(g_gloves[i][category]);
-      
-      //Add menu option
-      Format(categoryName, sizeof(categoryName), "%s", g_gloves[i][category]);
-      AddMenuItem(glovesMenu, categoryName, g_gloves[i][category]);
-      
-      //Create Menu
-      subMenus[index] = CreateMenu(glovesSubMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
-      SetMenuExitBackButton(subMenus[index], true);
-      SetMenuTitle(subMenus[index], "%s Gloves:", g_gloves[i][category]);
+}
+
+//Force client refresh and fireTo all players
+stock void ForceClientRefreshAll(int playerToRefresh)
+{
+  for (int i = 1; i <= MaxClients; ++i) {
+    if (IsClientInGame(i) && !IsFakeClient(i)) {
+      ForceClientRefresh(playerToRefresh, i);
     }
-    
-    //Add item to submenu
-    Format(item, sizeof(item), "%i", i);
-    AddMenuItem(subMenus[index], item, g_gloves[i][skinName]);
   }
-  
-  SetMenuExitButton(glovesMenu, true);
 }
 
 //Force client to refresh models etc by faking a player spawn event
@@ -583,15 +656,15 @@ stock void UpdateClientSleeves(int client)
   char m_szArmsModel[PLATFORM_MAX_PATH];
   GetEntPropString(client, Prop_Send, "m_szArmsModel", m_szArmsModel, sizeof(m_szArmsModel));
   
-  bool bUsingDefaultGloves = (g_ClientGlove[client] == DEFAULT_GLOVES) ? true : false;
+  bool isUsingDefaultGloves = (g_ClientGlove[client] == DEFAULT_GLOVES);
   
   //Search for a normal sleves match
-  int iNormalSleeves = sizeof(szGloveSleeves);
-  for (int i = 0; i < iNormalSleeves; ++i) {
-    if (StrEqual(m_szArmsModel, szNormalSleeves[i], false)) {
+  int normalSleeves = sizeof(s_GloveSleeves);
+  for (int i = 0; i < normalSleeves; ++i) {
+    if (StrEqual(m_szArmsModel, s_NormalSleeves[i], false)) {
       //If were not using default gloves, we need to update to the glove sleeve version
-      if (!bUsingDefaultGloves) {
-        SetEntPropString(client, Prop_Send, "m_szArmsModel", szGloveSleeves[i]);
+      if (!isUsingDefaultGloves) {
+        SetEntPropString(client, Prop_Send, "m_szArmsModel", s_GloveSleeves[i]);
       }
       
       return;
@@ -599,15 +672,29 @@ stock void UpdateClientSleeves(int client)
   }
   
   //Search for a gloves sleves match
-  int iGlovesSleeves = sizeof(szGloveSleeves);
-  for (int i = 0; i < iGlovesSleeves; ++i) {
-    if (StrEqual(m_szArmsModel, szGloveSleeves[i], false)) {
+  int gloveSleeves = sizeof(s_GloveSleeves);
+  for (int i = 0; i < gloveSleeves; ++i) {
+    if (StrEqual(m_szArmsModel, s_GloveSleeves[i], false)) {
       //If were using default gloves, we need to update to the normal sleeve version
-      if (bUsingDefaultGloves) {
-        SetEntPropString(client, Prop_Send, "m_szArmsModel", szNormalSleeves[i]);
+      if (isUsingDefaultGloves) {
+        SetEntPropString(client, Prop_Send, "m_szArmsModel", s_NormalSleeves[i]);
       }
       
       return;
     }
   }
+}
+
+stock bool ClientHasCharFlag(int client, char charFlag)
+{
+  AdminFlag flag;
+  return (FindFlagByChar(charFlag, flag) && ClientHasAdminFlag(client, flag));
+}
+
+stock bool ClientHasAdminFlag(int client, AdminFlag flag)
+{
+  AdminId admin = GetUserAdmin(client);
+  if (admin != INVALID_ADMIN_ID && GetAdminFlag(admin, flag, Access_Effective))
+    return true;
+  return false;
 }

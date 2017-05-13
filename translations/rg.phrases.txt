@@ -1,12 +1,12 @@
 ﻿"Phrases"
 {
-  "Menu title"
+  "Menu Title"
   {
-    "en"		"Gloves:"
+    "en"		"Rems Gloves"
   }
-  "Must Be Alive"
+  "Menu Current Gloves Title"
   {
-    "en"		"You must be alive to choose {green}gloves{default}."
+    "en"		"Current:"
   }
   "Must be VIP"
   {
@@ -17,8 +17,17 @@
     "#format"	"{1:s}"
     "en"			"You have equipped the {green}{1}{default} gloves."
   }
+  "Equipped Glove Dead"
+  {
+    "#format"	"{1:s}"
+    "en"			"You have selected the {green}{1}{default} gloves. They will be equipped the next time you spawn."
+  }
   "Anti Flood Message"
   {
     "en" "You are using this plugin too quickly, please wait a little then try again."
+  }
+  "Config Reloaded"
+  {
+    "en" "The config file has been successfully reloaded."
   }
 }
