@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.10"
+#define VERSION "1.11"
 
 public Plugin myinfo =
 {
@@ -33,38 +33,48 @@ ConVar g_Cvar_VipFlag = null;
 #define DEFAULT_GLOVES 0
 #define MAX_MENU_OPTIONS 8
 
-static char s_GloveSleeves[][] = 
-{
-  "models/weapons/v_models/arms/anarchist/v_sleeve_anarchist.mdl", 
-  "models/weapons/v_models/arms/balkan/v_sleeve_balkan.mdl", 
-  "models/weapons/v_models/arms/fbi/v_sleeve_fbi.mdl", 
-  "models/weapons/v_models/arms/gign/v_sleeve_gign.mdl", 
-  "models/weapons/v_models/arms/gsg9/v_sleeve_gsg9.mdl", 
-  "models/weapons/v_models/arms/idf/v_sleeve_idf.mdl", 
-  "models/weapons/v_models/arms/pirate/v_pirate_watch.mdl", 
-  "models/weapons/v_models/arms/professional/v_sleeve_professional.mdl", 
-  "models/weapons/v_models/arms/sas/v_sleeve_sas.mdl", 
-  "models/weapons/v_models/arms/separatist/v_sleeve_separatist.mdl", 
-  "models/weapons/v_models/arms/st6/v_sleeve_st6.mdl", 
-  "models/weapons/v_models/arms/swat/v_sleeve_swat.mdl"
-};
-
+//All entries in this array must be unique
 static char s_NormalSleeves[][] = 
 {
-  "models/weapons/t_arms_anarchist.mdl", 
-  "models/weapons/t_arms_pirate.mdl", 
-  "models/weapons/t_arms_professional.mdl", 
-  "models/weapons/t_arms_separatist.mdl", 
-  "models/weapons/t_arms_balkan.mdl", 
-  "models/weapons/t_arms_leet.mdl", 
-  "models/weapons/t_arms_phoenix.mdl", 
-  "models/weapons/ct_arms_gign.mdl", 
-  "models/weapons/ct_arms_gsg9.mdl", 
-  "models/weapons/ct_arms_st6.mdl", 
-  "models/weapons/ct_arms_fbi.mdl", 
-  "models/weapons/ct_arms_idf.mdl", 
-  "models/weapons/ct_arms_sas.mdl", 
+  "models/weapons/t_arms.mdl",
+  "models/weapons/ct_arms.mdl",
+  "models/weapons/t_arms_anarchist.mdl",
+  "models/weapons/t_arms_pirate.mdl",
+  "models/weapons/t_arms_professional.mdl",
+  "models/weapons/t_arms_separatist.mdl",
+  "models/weapons/t_arms_balkan.mdl",
+  "models/weapons/t_arms_leet.mdl",
+  "models/weapons/t_arms_phoenix.mdl",
+  "models/weapons/ct_arms_gign.mdl",
+  "models/weapons/ct_arms_gsg9.mdl",
+  "models/weapons/ct_arms_st6.mdl",
+  "models/weapons/ct_arms_fbi.mdl",
+  "models/weapons/ct_arms_idf.mdl",
+  "models/weapons/ct_arms_sas.mdl",
   "models/weapons/ct_arms_swat.mdl"
+};
+
+//Gloove variants of normal sleeves
+//Each entry here matches the entry in s_NormalSleeves with the same index
+//Blank string indicates default arms
+static char s_GloveSleeves[][] = 
+{
+  "", //just use defaults
+  "", //just use defaults
+  "models/weapons/v_models/arms/anarchist/v_sleeve_anarchist.mdl",
+  "models/weapons/v_models/arms/pirate/v_pirate_watch.mdl",
+  "models/weapons/v_models/arms/professional/v_sleeve_professional.mdl",
+  "models/weapons/v_models/arms/separatist/v_sleeve_separatist.mdl",
+  "models/weapons/v_models/arms/balkan/v_sleeve_balkan.mdl",
+  "", //no leet v_model exists for leet T skin
+  "", //no leet v_model exists for phoenix T skin
+  "models/weapons/v_models/arms/gign/v_sleeve_gign.mdl",
+  "models/weapons/v_models/arms/gsg9/v_sleeve_gsg9.mdl",
+  "models/weapons/v_models/arms/st6/v_sleeve_st6.mdl",
+  "models/weapons/v_models/arms/fbi/v_sleeve_fbi.mdl",
+  "models/weapons/v_models/arms/idf/v_sleeve_idf.mdl",
+  "models/weapons/v_models/arms/sas/v_sleeve_sas.mdl",
+  "models/weapons/v_models/arms/swat/v_sleeve_swat.mdl"
 };
 
 enum GloveStruct
@@ -81,6 +91,7 @@ int g_Gloves[MAX_GLOVES][GloveStruct];
 int g_GloveCount = 1; //starts from 1, not 0
 int g_ClientGlove[MAXPLAYERS+1] = {0, ...};
 int g_ClientGloveEntities[MAXPLAYERS+1] = {-1, ...};
+int g_ClientSleeveIndex[MAXPLAYERS+1] = {-1, ...}; //store index into s_NormalSleeves/s_GloveSleeves
 bool g_CanUse[MAXPLAYERS+1] = {true, ...}; //for anti-flood
 
 //Menu
@@ -162,18 +173,16 @@ public void OnPluginStart()
 
 public void OnMapStart()
 {
-  //Precache arms models
-  int gloveSleeves = sizeof(s_GloveSleeves);
-  for (int i = 0; i < gloveSleeves; i++) {
-    PrecacheModel(s_GloveSleeves[i], true);
+  //Precache arms sleeve models
+  for (int i = 0; i < sizeof(s_GloveSleeves); i++) {
+    if (FileExists(s_GloveSleeves[i]))
+      PrecacheModel(s_GloveSleeves[i], true);
   }
   
-  int normalSleeves = sizeof(s_NormalSleeves);
-  for (int i = 0; i < normalSleeves; i++) {
-    PrecacheModel(s_NormalSleeves[i], true);
+  for (int i = 0; i < sizeof(s_NormalSleeves); i++) {
+    if (FileExists(s_NormalSleeves[i]))
+      PrecacheModel(s_NormalSleeves[i], true);
   }
-  
-  PrecacheModel("models/weapons/v_models/arms/bare/v_bare_hands.mdl", true);
 }
 
 public void OnPluginEnd()
@@ -194,7 +203,10 @@ public void OnPluginEnd()
 
 public void OnClientPutInServer(int client)
 {
+  //Reset variables
   g_CanUse[client] = true;
+  g_ClientGloveEntities[client] = INVALID_ENT_REFERENCE;
+  g_ClientSleeveIndex[client] = -1;
 }
 
 public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
@@ -206,12 +218,12 @@ public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadca
   g_Cvar_VipFlag.GetString(buffer, sizeof(buffer));
   bool isVip = ClientHasCharFlag(client, buffer[0]);
   
+  //Force default gloves for non VIP
   if (!isVip)
-    return Plugin_Continue;
+    g_ClientGlove[client] = 0;
   
-  //Give player gloves post spawn if they have non-default gloves
-  if (g_ClientGlove[client] != 0)
-    GiveClientGloves(client, g_ClientGlove[client]);
+  //Give player gloves, also does processing for default gloves/no gloves
+  GiveClientGloves(client, g_ClientGlove[client]);
   
   return Plugin_Continue;
 }
@@ -462,12 +474,13 @@ int GiveClientGloves(int client, int i)
   UpdateClientSleeves(client);
   
   //If non-default gloves
-  if (i != 0) {
+  if (i != DEFAULT_GLOVES) {
     int ent = CreateEntityByName("wearable_item");
-    g_ClientGloveEntities[client] = EntIndexToEntRef(ent);
     
     //Process non-default gloves
-    if (ent != -1) {
+    if (ent != -1) {        
+      g_ClientGloveEntities[client] = EntIndexToEntRef(ent);
+    
       SetEntPropEnt(ent, Prop_Send, "m_hOwnerEntity", client);
       SetEntityModel(ent, g_Gloves[i][worldModel]);
       SetEntProp(ent, Prop_Send, "m_nModelIndex", PrecacheModel(g_Gloves[i][worldModel]));
@@ -489,7 +502,8 @@ int GiveClientGloves(int client, int i)
       //Call SDK function to give wearable
       SDKCall(g_GiveWearableCall, client, ent);
     }
-  } else {
+  }
+  else {
     //Reset this for default gloves
     SetEntProp(client, Prop_Send, "m_nBody", 0);
   }
@@ -650,39 +664,62 @@ stock void ForceClientRefresh(int playerToRefresh, int fireTo)
   }
 }
 
-//Update a clients gloves based on which default arm model they are using
+
+//Set the appropriate sleeves (arms models) based of if client is using gloves or not
 stock void UpdateClientSleeves(int client)
 {
+  //Get current arms
   char m_szArmsModel[PLATFORM_MAX_PATH];
   GetEntPropString(client, Prop_Send, "m_szArmsModel", m_szArmsModel, sizeof(m_szArmsModel));
   
-  bool isUsingDefaultGloves = (g_ClientGlove[client] == DEFAULT_GLOVES);
+  //We need to get the sleve index
+  //We search in this order: NormalSleeves -> g_ClientSleeveIndex -> s_GloveSleeves
+  //The s_GloveSleeves search is only a fallback as the first two searches should return a result
+  int index = SearchArray(s_NormalSleeves, sizeof(s_NormalSleeves), m_szArmsModel);
   
-  //Search for a normal sleves match
-  int normalSleeves = sizeof(s_GloveSleeves);
-  for (int i = 0; i < normalSleeves; ++i) {
-    if (StrEqual(m_szArmsModel, s_NormalSleeves[i], false)) {
-      //If were not using default gloves, we need to update to the glove sleeve version
-      if (!isUsingDefaultGloves) {
-        SetEntPropString(client, Prop_Send, "m_szArmsModel", s_GloveSleeves[i]);
-      }
-      
-      return;
-    }
+  if (index == -1)
+    index = g_ClientSleeveIndex[client];
+  
+  if (index == -1)
+    index = SearchArray(s_GloveSleeves, sizeof(s_GloveSleeves), m_szArmsModel);
+    
+  if (index == -1)
+    SetFailState("Failed to find a sleeve index");
+  
+  //Preserve the index for the next usage
+  g_ClientSleeveIndex[client] = index;
+  
+  //If using default gloves
+  if (g_ClientGlove[client] == DEFAULT_GLOVES) {
+    //Need to set s_NormalSleeves
+    Format(m_szArmsModel, sizeof(m_szArmsModel), s_NormalSleeves[index]);
+  }
+  else {
+    //Need to set s_GloveSleeves
+    Format(m_szArmsModel, sizeof(m_szArmsModel), s_GloveSleeves[index]);
   }
   
-  //Search for a gloves sleves match
-  int gloveSleeves = sizeof(s_GloveSleeves);
-  for (int i = 0; i < gloveSleeves; ++i) {
-    if (StrEqual(m_szArmsModel, s_GloveSleeves[i], false)) {
-      //If were using default gloves, we need to update to the normal sleeve version
-      if (isUsingDefaultGloves) {
-        SetEntPropString(client, Prop_Send, "m_szArmsModel", s_NormalSleeves[i]);
-      }
-      
-      return;
-    }
+  //If non emtpy model, perform precache here
+  //Fixes issue where arms don't appear properly and default back to maps arms
+  if (!StrEqual(m_szArmsModel, ""))
+    PrecacheModel(m_szArmsModel, false);
+  
+  //Finally set arms model
+  SetEntPropString(client, Prop_Send, "m_szArmsModel", m_szArmsModel);
+  
+  //Perform refresh at this point
+  ForceClientRefreshAll(client);
+}
+
+//Given an array, searches 
+stock int SearchArray(char[][] array, int arrayMaxLength, char[] searchString, bool caseSensitive = false)
+{
+  for (int i = 0; i < arrayMaxLength; ++i) {
+    if (StrEqual(searchString, array[i], caseSensitive))
+      return i;
   }
+  
+  return -1;
 }
 
 stock bool ClientHasCharFlag(int client, char charFlag)
