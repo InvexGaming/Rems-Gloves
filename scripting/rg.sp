@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.11"
+#define VERSION "1.12"
 
 public Plugin myinfo =
 {
@@ -213,6 +213,15 @@ public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadca
 {
   int client = GetClientOfUserId(event.GetInt("userid"));
   
+  //Do actual giving of gloves in next frame
+  //Allows other player_spawn hooks to change arms/models if needed
+  RequestFrame(RequestFrame_PlayerSpawn, client);
+  
+  return Plugin_Continue;
+}
+
+public void RequestFrame_PlayerSpawn(int client)
+{
   //Get VIP status
   char buffer[2];
   g_Cvar_VipFlag.GetString(buffer, sizeof(buffer));
@@ -224,8 +233,6 @@ public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadca
   
   //Give player gloves, also does processing for default gloves/no gloves
   GiveClientGloves(client, g_ClientGlove[client]);
-  
-  return Plugin_Continue;
 }
 
 public Action Event_PlayerTeam(Event event, const char[] name, bool dontBroadcast)
