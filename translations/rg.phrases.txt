@@ -10,17 +10,21 @@
   }
   "Must be VIP"
   {
-    "en"			"You must be a VIP user to use this command. Type {green}!vip{default} to learn more."
+    "en"			"You must be a VIP user to use this command. Type {lime}!vip{default} to learn more."
   }
   "Equipped Glove"
   {
     "#format"	"{1:s}"
-    "en"			"You have equipped the {green}{1}{default} gloves."
+    "en"			"You have equipped the {lime}{1}{default} gloves."
   }
   "Equipped Glove Dead"
   {
     "#format"	"{1:s}"
-    "en"			"You have selected the {green}{1}{default} gloves. They will be equipped the next time you spawn."
+    "en"			"You have selected the {lime}{1}{default} gloves. They will be equipped the next time you spawn."
+  }
+  "Legacy Player Model"
+  {
+    "en"			"You are currently using a {orange}legacy player model{default} so your gloves will not be shown in third person view."
   }
   "Anti Flood Message"
   {

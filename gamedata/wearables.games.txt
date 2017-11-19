@@ -11,8 +11,8 @@
 			}
 			"EquipWearable"
 			{
-				"windows"	"333"
-				"linux"		"111"
+				"windows"	"334"
+				"linux"		"335"
 			}
 			"RemoveWearable"
 			{

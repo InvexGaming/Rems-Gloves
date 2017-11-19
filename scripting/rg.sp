@@ -3,13 +3,13 @@
 #include <sdkhooks>
 #include <cstrike>
 #include <clientprefs>
-#include <multicolors>
+#include <colors_csgo_v2>
 
 #pragma semicolon 1
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.12"
+#define VERSION "1.13"
 
 public Plugin myinfo =
 {
@@ -25,7 +25,7 @@ ConVar g_Cvar_AntiFloodTime = null;
 ConVar g_Cvar_VipFlag = null;
 
 //Definitions
-#define CHAT_TAG_PREFIX "[{green}RG{default}] "
+#define CHAT_TAG_PREFIX "[{lime}RG{default}] "
 #define MAX_GLOVES 50
 #define SKIN_MAX_LENGTH 64
 #define CATEGORY_MAX_LENGTH 64
@@ -105,6 +105,8 @@ Handle g_GloveIndexCookie = null;
 
 //SDKCall
 Handle g_GiveWearableCall = null;
+Handle g_LookupAttachmentCall = null;
+Handle g_LookupBoneCall = null;
 
 //Lateload
 bool g_LateLoaded = false;
@@ -137,6 +139,8 @@ public void OnPluginStart()
   RegAdminCmd("sm_rg_reloadconfig", Command_ReloadConfig, ADMFLAG_ROOT, "Reload config file");
   
   //Prepare SDK call values
+  
+  //g_GiveWearableCall
   Handle hConfig = LoadGameConfigFile("wearables.games");
   if (hConfig == null)
     SetFailState("Error loading wearables.games gamedata file.");
@@ -149,6 +153,36 @@ public void OnPluginStart()
   PrepSDKCall_SetVirtual(iEquipOffset);
   PrepSDKCall_AddParameter(SDKType_CBaseEntity, SDKPass_Pointer);
   g_GiveWearableCall = EndPrepSDKCall();
+  
+  delete hConfig;
+  
+  //g_LookupAttachmentCall
+  hConfig = LoadGameConfigFile("rg.games");
+  if (hConfig == null)
+    SetFailState("Error loading rg.games gamedata file.");
+  
+  StartPrepSDKCall(SDKCall_Entity);
+  PrepSDKCall_SetFromConf(hConfig, SDKConf_Signature, "LookupAttachment");
+  PrepSDKCall_AddParameter(SDKType_String, SDKPass_Pointer);
+  PrepSDKCall_SetReturnInfo(SDKType_PlainOldData, SDKPass_Plain);
+  g_LookupAttachmentCall = EndPrepSDKCall();
+  
+  if (!g_LookupAttachmentCall)
+    SetFailState("Error finding LookupAttachment signature.");
+  
+  //g_LookupBoneCall
+  //int CBaseAnimating::LookupBone( const char *szName )
+  //Returns: Bone index number of -1 if no bone found
+  StartPrepSDKCall(SDKCall_Entity);
+  PrepSDKCall_SetFromConf(hConfig, SDKConf_Signature, "LookupBone");
+  PrepSDKCall_AddParameter(SDKType_String, SDKPass_Pointer);
+  PrepSDKCall_SetReturnInfo(SDKType_PlainOldData, SDKPass_Plain);
+  g_LookupBoneCall = EndPrepSDKCall();
+  
+  if (!g_LookupBoneCall)
+    SetFailState("Error finding LookupBone signature.");
+  
+  delete hConfig;
   
   //Init array list
   g_Categories = new ArrayList(CATEGORY_MAX_LENGTH);
@@ -340,6 +374,10 @@ public int g_GloveMenuHandler(Menu menu, MenuAction action, int client, int para
           CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove", fullGloveName);
         else
           CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Equipped Glove Dead", fullGloveName);
+          
+        //Print out legacy player model warning
+        if (IsClientModelLegacy(client))
+          CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Legacy Player Model");
       }
       
       //Set anti flood timer
@@ -485,7 +523,7 @@ int GiveClientGloves(int client, int i)
     int ent = CreateEntityByName("wearable_item");
     
     //Process non-default gloves
-    if (ent != -1) {        
+    if (ent != -1) {
       g_ClientGloveEntities[client] = EntIndexToEntRef(ent);
     
       SetEntPropEnt(ent, Prop_Send, "m_hOwnerEntity", client);
@@ -508,6 +546,10 @@ int GiveClientGloves(int client, int i)
      
       //Call SDK function to give wearable
       SDKCall(g_GiveWearableCall, client, ent);
+      
+      //After SDK call is made, check if we should remove model in third person view for legacy player models
+      if (IsClientModelLegacy(client))
+        SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", -1);
     }
   }
   else {
@@ -671,7 +713,6 @@ stock void ForceClientRefresh(int playerToRefresh, int fireTo)
   }
 }
 
-
 //Set the appropriate sleeves (arms models) based of if client is using gloves or not
 stock void UpdateClientSleeves(int client)
 {
@@ -716,6 +757,19 @@ stock void UpdateClientSleeves(int client)
   
   //Perform refresh at this point
   ForceClientRefreshAll(client);
+}
+
+//Check if client is using a legacy player model
+bool IsClientModelLegacy(int client)
+{
+  if (!SDKCall(g_LookupAttachmentCall, client, "legacy_weapon_bone"))
+    return true;
+  else {
+    if (SDKCall(g_LookupBoneCall, client, "ValveBiped.Bip01_Pelvis") != -1)
+      return true;
+    else
+      return false;
+  }
 }
 
 //Given an array, searches 
