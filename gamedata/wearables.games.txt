@@ -6,8 +6,8 @@
 		{
 			"RemoveAllWearables"
 			{
-				"windows"	"327"
-				"linux"		"328"
+				"windows"	"328"
+				"linux"		"329"
 			}
 			"EquipWearable"
 			{
@@ -16,29 +16,29 @@
 			}
 			"RemoveWearable"
 			{
-				"windows"	"334"
-				"linux"		"335"
-			}
-			"FindWearableInSlot"
-			{
 				"windows"	"335"
 				"linux"		"336"
 			}
-			"RemoveWearableInSlot"
+			"FindWearableInSlot"
 			{
 				"windows"	"336"
 				"linux"		"337"
 			}
+			"RemoveWearableInSlot"
+			{
+				"windows"	"337"
+				"linux"		"338"
+			}
 			"EquipSuit"
 			{
-				"windows"	"492"
-				"linux"		"493"
+				"windows"	"493"
+				"linux"		"494"
 			}
 			
 			"RemoveSuit"
 			{
-				"windows"	"493"
-				"linux"		"494"
+				"windows"	"494"
+				"linux"		"495"
 			}
 		}
 	}
