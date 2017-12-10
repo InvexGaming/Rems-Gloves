@@ -26,6 +26,10 @@
   {
     "en"			"You are currently using a {orange}legacy player model{default} so your gloves will not be shown in third person view."
   }
+  "Custom Arms Model"
+  {
+    "en"			"You are currently using a {orange}custom arms model{default} so your gloves will not be shown."
+  }
   "Anti Flood Message"
   {
     "en" "You are using this plugin too quickly, please wait a little then try again."

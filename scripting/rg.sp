@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.13"
+#define VERSION "1.14"
 
 public Plugin myinfo =
 {
@@ -317,7 +317,7 @@ public void ShowGlovesMenu(int client)
   g_GloveMenu.Display(client, MENU_TIME_FOREVER);
 }
 
-public int g_GloveMenuHandler(Menu menu, MenuAction action, int client, int param2)
+public int GloveMenuHandler(Menu menu, MenuAction action, int client, int param2)
 {
   //Get menu info
   char info[64];
@@ -378,6 +378,10 @@ public int g_GloveMenuHandler(Menu menu, MenuAction action, int client, int para
         //Print out legacy player model warning
         if (IsClientModelLegacy(client))
           CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Legacy Player Model");
+
+        //Print out custom arms warning
+        if (IsClientArmsModelCustom(client))
+          CPrintToChat(client, "%s%t", CHAT_TAG_PREFIX, "Custom Arms Model");
       }
       
       //Set anti flood timer
@@ -394,7 +398,7 @@ public int g_GloveMenuHandler(Menu menu, MenuAction action, int client, int para
   return 0;
 }
 
-public int glovesSubMenuHandler(Menu menu, MenuAction action, int client, int param2)
+public int GloveSubMenuHandler(Menu menu, MenuAction action, int client, int param2)
 {
   //Get menu info
   char info[64];
@@ -515,11 +519,15 @@ int GiveClientGloves(int client, int i)
   //Remove current gloves
   RemoveClientGloves(client);
   
-  //Update the clients sleeves to use a gloves supporting arms model
-  UpdateClientSleeves(client);
-  
-  //If non-default gloves
-  if (i != DEFAULT_GLOVES) {
+  //Check if using custom arms
+  bool isUsingCustomArms = IsClientArmsModelCustom(client);
+
+  //Update the clients sleeves to use a gloves supporting arms model for non-custom arms
+  if (!isUsingCustomArms)
+    UpdateClientSleeves(client);
+
+  //If non-default gloves and we aren't using custom arms, give the client gloves
+  if (i != DEFAULT_GLOVES && !isUsingCustomArms) {
     int ent = CreateEntityByName("wearable_item");
     
     //Process non-default gloves
@@ -552,8 +560,8 @@ int GiveClientGloves(int client, int i)
         SetEntPropEnt(ent, Prop_Data, "m_hMoveParent", -1);
     }
   }
+  //Otherwise, reset the values for default gloves 
   else {
-    //Reset this for default gloves
     SetEntProp(client, Prop_Send, "m_nBody", 0);
   }
   
@@ -605,7 +613,7 @@ void ReadGloveConfigFile()
   g_NumSubMenus = 0;
   
   //Create main menu
-  g_GloveMenu = new Menu(g_GloveMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
+  g_GloveMenu = new Menu(GloveMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
   g_GloveMenu.Pagination = MENU_NO_PAGINATION; //TODO: temp, remove this when more glove families are added
   g_GloveMenu.ExitButton = true; //set after MENU_NO_PAGINATION is set. TODO: temp
   
@@ -655,7 +663,7 @@ void ReadGloveConfigFile()
         g_GloveMenu.AddItem(gloveCategory, gloveCategory);
         
         //Create Sub Menu
-        g_SubMenus[categoryIndex] = new Menu(glovesSubMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
+        g_SubMenus[categoryIndex] = new Menu(GloveSubMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
         g_SubMenus[categoryIndex].SetTitle("%s Gloves:", gloveCategory);
         g_SubMenus[categoryIndex].ExitBackButton = true;
         ++g_NumSubMenus;
@@ -770,6 +778,21 @@ bool IsClientModelLegacy(int client)
     else
       return false;
   }
+}
+
+//Check if the client is using custom player arms (non stock normal/sleeve arms)
+bool IsClientArmsModelCustom(int client)
+{
+  //Get current arms
+  char m_szArmsModel[PLATFORM_MAX_PATH];
+  GetEntPropString(client, Prop_Send, "m_szArmsModel", m_szArmsModel, sizeof(m_szArmsModel));
+
+  //Search normal sleeves and glove sleeves arrays
+  int index = SearchArray(s_NormalSleeves, sizeof(s_NormalSleeves), m_szArmsModel);
+  if (index == -1)
+    index = SearchArray(s_GloveSleeves, sizeof(s_GloveSleeves), m_szArmsModel);
+
+  return (index == -1);
 }
 
 //Given an array, searches 
