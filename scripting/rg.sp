@@ -583,6 +583,9 @@ public void OnClientCookiesCached(int client)
 //Clean up when client disconnects
 public void OnClientDisconnect(int client)
 { 
+  if (IsFakeClient(client))
+    return;
+  
   if (AreClientCookiesCached(client)) {
     char index[4];
     IntToString(g_ClientGlove[client], index, sizeof(index));
@@ -814,6 +817,9 @@ stock bool ClientHasCharFlag(int client, char charFlag)
 
 stock bool ClientHasAdminFlag(int client, AdminFlag flag)
 {
+  if (!IsClientConnected(client))
+    return false;
+  
   AdminId admin = GetUserAdmin(client);
   if (admin != INVALID_ADMIN_ID && GetAdminFlag(admin, flag, Access_Effective))
     return true;
