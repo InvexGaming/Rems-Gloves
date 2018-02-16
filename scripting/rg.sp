@@ -9,7 +9,7 @@
 #pragma newdecls required
 
 // Plugin Informaiton
-#define VERSION "1.14"
+#define VERSION "1.15"
 
 public Plugin myinfo =
 {
@@ -448,7 +448,7 @@ public int GloveSubMenuHandler(Menu menu, MenuAction action, int client, int par
     g_CanUse[client] = false;
     CreateTimer(g_Cvar_AntiFloodTime.FloatValue, Timer_ReEnableUsage, client);
     
-    menu.DisplayAt(client, 0, MENU_TIME_FOREVER);
+    menu.DisplayAt(client, GetMenuSelectionPosition(), MENU_TIME_FOREVER);
   }
   else if (action == MenuAction_Cancel)
   {
@@ -617,8 +617,6 @@ void ReadGloveConfigFile()
   
   //Create main menu
   g_GloveMenu = new Menu(GloveMenuHandler, MenuAction_Select|MenuAction_Cancel|MenuAction_End|MenuAction_DisplayItem|MenuAction_DrawItem);
-  g_GloveMenu.Pagination = MENU_NO_PAGINATION; //TODO: temp, remove this when more glove families are added
-  g_GloveMenu.ExitButton = true; //set after MENU_NO_PAGINATION is set. TODO: temp
   
   char numStrBuffer[3];
   IntToString(RANDOM_GLOVES, numStrBuffer, sizeof(numStrBuffer));
