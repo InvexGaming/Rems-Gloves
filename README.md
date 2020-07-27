@@ -16,6 +16,10 @@
 ## Description
 Glove plugin for CSGO.
 
+## Showcase
+Click image below to see demo video:
+<a href="https://invex.gg/vip/media/rgshowcase.mp4"><img src="https://i.imgur.com/dHeMReL.png" /></a>
+
 ## Contributions
 Contributions are always welcome!
 Just make a [pull request](../../pulls).
